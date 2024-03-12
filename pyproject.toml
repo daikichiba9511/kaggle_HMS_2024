@@ -1,0 +1,105 @@
+[project]
+name = "hms_2024"
+version = "0.1.0"
+description = "HMS - Harmful Brain Activity Classificatoin"
+authors = [{ name = "daikichiba9511", email = "daikichiba.tech.ml@gmail.com" }]
+dependencies = [
+    "numpy>=1.24.4",
+    "pandas>=2.0.3",
+    "fastparquet>=2023.10.1",
+    "pyarrow>=15.0.0",
+    "polars>=0.20.3",
+    "scikit-learn>=1.3.2",
+    "matplotlib>=3.7.4",
+    "plotly>=5.17.0",
+    "seaborn>=0.13.0",
+    "lightgbm>=4.3.0",
+    # "torch==2.1.2+cu118",
+    "torch==2.2.1",
+    "torchvision==0.17.1",
+    "timm>=0.9.12",
+    "opencv-python>=4.9.0.80",
+    "albumentations>=1.3.1",
+    # "h5py>=3.10.0",
+    "monai[all]>=1.3.0",
+    "torchvision>=0.17.1",
+    "librosa>=0.10.1",
+]
+readme = "README.md"
+requires-python = ">= 3.10"
+
+[project.scripts]
+hello = "src:hello"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = [
+    "kaggle>=1.5.16",
+    "ruff>=0.1.11",
+    "ipython~=8.14.0",
+    "jupyterlab~=4.0.2",
+    "wandb>=0.16.2",
+    "mypy>=1.4.1",
+    "ipykernel>=6.25.2",
+    "memray>=1.10.0",
+    "tabulate>=0.9.0",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+# Reference: 
+# https://rye-up.com/guide/faq/
+[[tool.rye.sources]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu118"
+# type = "index"
+
+[tool.ruff]
+preview = true
+select = ["E", "F", "B", "W", "I"]
+target-version = "py310"
+line-length = 119
+ignore = [
+    "E203", # white space before ':', not compatible with black
+    "E501", # line-length violation
+    "B905", # zip iterator without strict parameter
+]
+unfixable = ["B"]
+exclude = [
+    "git",
+    ".venv",
+    "__pycache__",
+    ".github",
+    ".mypy_cache",
+    ".vscode",
+    ".pytest_cache",
+    "notebooks",
+    ".ipynb_checkpoints",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+disallow_untyped_defs = true
+allow_redefinition = true
+warn_redundant_casts = true
+show_error_context = true
+incremental = false
+no_implicit_optional = true
+warn_unreachable = true
+show_error_codes = true
+pretty = true
+disallow_incomplete_defs = true
+warn_no_return = true
+plugins = "numpy.typing.mypy_plugin"
