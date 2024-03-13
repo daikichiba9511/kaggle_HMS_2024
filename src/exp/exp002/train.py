@@ -14,7 +14,7 @@ from torch.utils import data as torch_data
 from tqdm.auto import tqdm
 
 import wandb
-from src.exp.exp001 import config as my_config
+from src.exp.exp002 import config as my_config
 from src.training import data as my_data
 from src.training import losses as my_losses
 from src.training import tools as my_tools

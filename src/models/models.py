@@ -82,7 +82,7 @@ class HMSTransformerModel(nn.Module):
             nn.Linear(1088, 6),
         )
 
-    def _transform_to_a_spectrogram(self: Self, x: torch.Tensor) -> torch.Tensor:
+    def _consolidate_patches_into_a_image(self: Self, x: torch.Tensor) -> torch.Tensor:
         """make a spectrogram from the eeg and the spectrogram
 
         Args:
@@ -114,12 +114,12 @@ class HMSTransformerModel(nn.Module):
         return x
 
     def forward(self: Self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-        x = self._transform_to_a_spectrogram(x)
-        x1 = self.backbone_transformer(x)
+        img = self._consolidate_patches_into_a_image(x)
+        x1 = self.backbone_transformer(img)
         # shape: (bs, 768, 16, 16)
         x1 = x1[-1]
 
-        x = self.backbone(x)
+        x = self.backbone(img)
         # shape: (bs, 320, 16, 16)
         x = x[-1]
 
@@ -174,10 +174,12 @@ class HMS1DFEModel(nn.Module):
             dict[str, torch.Tensor]:
                 logits: output tensor, shape (bs, num_classes)
         """
+        # shape: (bs, hidden_size1)
         hidden = self.fe(x)
 
         detect_out, _ = self.detector(x.permute(0, 2, 1))
         # 一番最後の状態だけ取り出す
+        # shape: (bs, hidden_size2)
         detect_out = detect_out[:, -1, :]
 
         out = torch.cat([hidden, detect_out], dim=1)

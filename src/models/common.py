@@ -14,12 +14,14 @@ logger = getLogger(__name__)
 ModelType = Literal["HMSModel", "HMSTransformer"]
 
 
-class HMSModelParams(TypedDict):
+@dataclasses.dataclass
+class HMSModelParams:
     model_name: str
     pretrained: bool
 
 
-class HMSTransformerModelParams(TypedDict):
+@dataclasses.dataclass
+class HMSTransformerModelParams:
     model_name: str
     pretrained: bool
 
@@ -32,18 +34,32 @@ class ModelConfig(Protocol):
     model_params: ModelParams
 
 
-def init_model(model_name: ModelType, model_params: ModelParams) -> torch.nn.Module:
-    if model_name == "HMSModel":
-        model = models.HMSModel(model_name=model_params["model_name"], pretrained=model_params["pretrained"])
-        return model
-    elif model_name == "HMSTransformer":
-        model = models.HMSTransformerModel(
-            model_name=model_params["model_name"], pretrained=model_params["pretrained"]
-        )
-        return model
+def init_model(model_name: ModelType, model_params: ModelParams) -> nn.Module:
+    match model_name, model_params:
+        case "HMSModel", HMSModelParams(model_name=model_params.model_name, pretrained=model_params.pretrained):
+            model = models.HMSModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
+            return model
+        case "HMSTransformer", HMSTransformerModelParams(
+            model_name=model_params.model_name, pretrained=model_params.pretrained
+        ):
+            model = models.HMSTransformerModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
+            return model
+        case _:
+            raise NotImplementedError(
+                f"model_name={model_name} x model_params={model_params} is not supported. Please implement the model"
+            )
 
-    else:
-        raise NotImplementedError(f"model_name={model_name} is not supported. Please implement the model.")
+    # if model_name == "HMSModel":
+    #     model = models.HMSModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
+    #     return model
+    # elif model_name == "HMSTransformer":
+    #     model = models.HMSTransformerModel(
+    #         model_name=model_params["model_name"], pretrained=model_params["pretrained"]
+    #     )
+    #     return model
+
+    # else:
+    #     raise NotImplementedError(f"model_name={model_name} is not supported. Please implement the model.")
 
 
 @dataclasses.dataclass
@@ -95,35 +111,39 @@ class Ensemble(nn.Module):
 def _test_init_model() -> None:
     model = init_model(
         model_name="HMSModel",
-        model_params=cast(
-            HMSModelParams,
-            dict(
-                model_name="tf_efficientnet_b0.ns_jft_in1k",
-                pretrained=False,
-            ),
+        model_params=HMSModelParams(
+            model_name="tf_efficientnet_b0.ns_jft_in1k",
+            pretrained=False,
         ),
     )
-    print(model)
+    print(type(model))
+
+    model = init_model(
+        model_name="HMSTransformer",
+        model_params=HMSTransformerModelParams(
+            model_name="tf_efficientnet_b0.ns_jft_in1k",
+            pretrained=False,
+        ),
+    )
+    print(type(model))
+
 
 
 def _test_load_model() -> None:
     model = load_model(
         weights_fp=pathlib.Path("output/exp001/last_exp001_fold0.pth"),
         model_name="HMSModel",
-        model_params=cast(
-            HMSModelParams,
-            dict(
-                model_name="tf_efficientnet_b0.ns_jft_in1k",
-                pretrained=False,
-            ),
+        model_params=HMSModelParams(
+            model_name="tf_efficientnet_b0.ns_jft_in1k",
+            pretrained=False,
         ),
     )
-    print(model)
+    print(type(model))
 
 
 def _test() -> None:
     _test_init_model()
-    _test_load_model()
+    # _test_load_model()
 
 
 if __name__ == "__main__":

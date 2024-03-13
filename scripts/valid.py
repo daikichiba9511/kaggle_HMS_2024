@@ -21,7 +21,7 @@ logger = my_utils_logger.get_root_logger()
 
 def main() -> None:
     cfg = my_config.ConfigImpl()
-    cfg.model_config.model_params["pretrained"] = False
+    cfg.model_config.model_params.pretrained = False
     cfg.valid_config.dataloader_params["is_debug"] = True
 
     logger.info(f"{pprint.pformat(dataclasses.asdict(cfg))}")
@@ -31,9 +31,9 @@ def main() -> None:
     scores = []
     for fold in range(5):
         dl = my_data.init_valid_dataloader(fold, **cfg.valid_config.dataloader_params)
-
         models = []
         model_weights = [
+            # -- Exp001: mean oof score = 0.4823949817313776
             pathlib.Path("output/exp001/best_exp001_fold0.pth"),
             pathlib.Path("output/exp001/best_exp001_fold1.pth"),
             pathlib.Path("output/exp001/best_exp001_fold2.pth"),
@@ -82,7 +82,7 @@ def main() -> None:
         logger.info(f"{score = }")
 
     mean_oof_score = np.mean(scores)
-    logger.info(f"{mean_oof_score = }")
+    logger.info(f"{mean_oof_score = } { scores = }")
 
 
 if __name__ == "__main__":
