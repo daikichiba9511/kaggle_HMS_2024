@@ -131,7 +131,7 @@ def valid_one_epoch(
         spec_ids_list.append(batch["spec_id"])
         y_preds_list.append(y_pred.cpu().detach().numpy())
         y_trues_list.append(y.cpu().detach().numpy())
-        y_raws_list.append(logits.cpu().detach().numpy())
+        y_raws_list.append(batch["y_raw"].cpu().detach().numpy())
 
         pbar.set_postfix({"loss": losses.avg, "acc": accs.avg})
 

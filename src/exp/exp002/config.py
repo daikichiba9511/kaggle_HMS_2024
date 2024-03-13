@@ -12,7 +12,7 @@ from src.training import tools as my_tools
 
 @dataclasses.dataclass
 class ModelConfigImpl(my_models_common.ModelConfig):
-    model_name: my_models_common.ModelType = "HMSModel"
+    model_name: my_models_common.ModelType = "HMSTransformer"
     model_params: my_models_common.ModelParams = dataclasses.field(
         default_factory=lambda: cast(
             my_models_common.HMSModelParams,
@@ -26,7 +26,7 @@ class ModelConfigImpl(my_models_common.ModelConfig):
 
 @dataclasses.dataclass
 class TrainConfigImpl(my_tools.TrainConfig):
-    n_epochs: int = 7
+    n_epochs: int = 15
     optimizer_name: my_optim.OptimizerType = "AdamW"
     optimizer_params: my_optim.OptimParams = dataclasses.field(
         default_factory=lambda: cast(

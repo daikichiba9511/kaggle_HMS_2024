@@ -1,11 +1,14 @@
 from logging import getLogger
+from typing import TypedDict
 
 import albumentations as A
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import polars as pl
 import torch
 from torch.utils import data as torch_data
+from typing_extensions import Self
 
 from src import constants
 from src.training import cv as my_cv
@@ -66,6 +69,68 @@ class TrainHMSDataset(torch_data.Dataset):
 
         x = torch.tensor(x, dtype=torch.float32)
         y = torch.tensor(y, dtype=torch.float32)
+
+        return {
+            "x": x,
+            "y": y,
+            "eeg_id": row["eeg_id"],
+            "spec_id": row["spec_id"],
+        }
+
+
+def _preprocess_raw_signal_for_eeg_dataset(data: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+    data = np.clip(data, -1024, 1024)
+    data = np.nan_to_num(data, nan=0.0) / 32.0
+
+    # to remove the noise and high frequency signals
+    data = my_preprocessings.preprocess_raw_signal(data, classes=1)
+    return data
+
+
+class TrainEEGOutput(TypedDict):
+    x: torch.Tensor
+    """shape: (10_000, 20), cols: see constants.feature_cols
+    """
+    y: torch.Tensor
+    """shape: (6,),
+        smoothed value in [0, 1].
+        order: see constants.TARGETS
+    """
+    eeg_id: str
+    spec_id: str
+
+
+class TrainEEGDataset(torch_data.Dataset):
+    """
+    Ref:
+    1. https://www.kaggle.com/code/nischaydnk/lightning-1d-eegnet-training-pipeline-hbs?scriptVersionId=160814948
+    """
+
+    def __init__(
+        self: Self,
+        df: pd.DataFrame,
+        eegs: dict[str, npt.NDArray[np.float32]],
+        transform: A.Compose | None = None,
+    ) -> None:
+        self.df = df
+        self.eegs = eegs
+        self.transform = transform
+
+    def __len__(self: Self) -> int:
+        return len(self.df)
+
+    def __getitem__(self: Self, idx: int) -> TrainEEGOutput:
+        row = self.df.iloc[idx]
+        data = self.eegs[row["eeg_id"]]
+        data = _preprocess_raw_signal_for_eeg_dataset(data)
+        x = torch.tensor(data, dtype=torch.float32)
+
+        if self.transform is not None:
+            x = self.transform(image=x)["image"]
+
+        y = row[constants.TARGETS].to_numpy().astype(np.float32)
+        y += 1 / 6
+        y /= y.sum()
 
         return {
             "x": x,
@@ -137,6 +202,59 @@ class ValidHMSDataset(torch_data.Dataset):
             "spec_id": row["spec_id"],
             # "spec_offset": row["spectrogram_label_offset_seconds"],
             "spec_offset": r * 2,
+        }
+
+
+class ValidEEGOutput(TypedDict):
+    x: torch.Tensor
+    """shape: (10_000, 20), cols: see constants.feature_cols
+    """
+    y: torch.Tensor
+    """shape: (6,),
+        smoothed value in [0, 1].
+        order: see constants.TARGETS
+    """
+    y_raw: torch.Tensor
+    """shape: (6,), raw value of the count by annotator.
+    """
+    eeg_id: str
+    spec_id: str
+
+
+class ValidEEGDataset(torch_data.Dataset):
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        eegs: dict[str, npt.NDArray[np.float32]],
+        transform: A.Compose | None = None,
+        mode: str = "tta",
+    ) -> None:
+        self.df = df
+        self.eegs = eegs
+        self.transform = transform
+        self.mode = mode
+
+    def __len__(self) -> int:
+        return len(self.df)
+
+    def __getitem__(self, idx: int) -> ValidEEGOutput:
+        row = self.df.iloc[idx]
+        data = self.eegs[row["eeg_id"]]
+        data = _preprocess_raw_signal_for_eeg_dataset(data)
+        x = torch.tensor(data, dtype=torch.float32)
+
+        y = row[constants.TARGETS].to_numpy().astype(np.float32)
+        y += 1 / 6
+        y /= y.sum()
+
+        y_raw = torch.tensor(row[constants.TARGETS].to_numpy().astype(np.float32), dtype=torch.float32)
+
+        return {
+            "x": x,
+            "y": y,
+            "y_raw": y_raw,
+            "eeg_id": row["eeg_id"],
+            "spec_id": row["spec_id"],
         }
 
 
@@ -305,8 +423,34 @@ def _test_train_dl() -> None:
     print(f"{batch['y'].min() = }, {batch['y'].max() = }")
 
 
+def _test_train_eeg_ds() -> None:
+    df = load_train_df(fold=0)
+    eegs = my_preprocessings.retrieve_eegs_from_parquet(df["eeg_id"].unique().to_list(), constants.feature_cols)
+    ds = TrainEEGDataset(df=df.to_pandas(use_pyarrow_extension_array=True), eegs=eegs, transform=None)
+    dl = torch_data.DataLoader[TrainEEGOutput](
+        dataset=ds,
+        batch_size=2,
+        shuffle=True,
+        num_workers=4,
+        drop_last=True,
+        pin_memory=True,
+        prefetch_factor=2,
+        worker_init_fn=lambda _: my_utils_common.seed_everything(42),
+        persistent_workers=True,
+    )
+
+    batch: TrainEEGOutput = next(iter(dl))
+    print(f"{batch.keys() = }")
+    print(f"{batch['x'].shape = }")
+    print(f"{batch['y'].shape = }")
+
+    assert batch["x"].shape == (2, 10_000, 20)
+    assert batch["y"].shape == (2, 6)
+
+
 def _test() -> None:
-    _test_train_dl()
+    # _test_train_dl()
+    _test_train_eeg_ds()
 
 
 if __name__ == "__main__":

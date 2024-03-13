@@ -1,12 +1,14 @@
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from logging import getLogger
 
 import albumentations as A
 import librosa
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import polars as pl
+from scipy import signal
 
 # from albumentations.pytorch import ToTensorV2
 from tqdm.auto import tqdm
@@ -50,11 +52,55 @@ def get_transforms(is_train: bool) -> A.Compose:
             A.XYMasking(**params1, p=0.5),
             A.XYMasking(**params2, p=0.5),
             A.XYMasking(**params3, p=0.5),
+            A.HorizontalFlip(p=0.5),
+            A.OneOf([
+                A.XYMasking(mask_x_length=5, mask_y_length=16, num_masks_x=1, num_masks_y=1, fill_value=0, p=0.5),
+                A.CoarseDropout(max_holes=4),
+            ]),
             # ToTensorV2(),
         ])
     else:
         # return A.Compose([ToTensorV2()])
         raise NotImplementedError("validation transform is not implemented")
+
+
+def butter_lowpass_filter(
+    data: npt.NDArray[np.floating], cutoff_freq: int = 20, samplint_rate: int = 200, order: int = 4
+) -> npt.NDArray[np.floating]:
+    """Apply a lowpass filter to the data to remove high frequency noise
+
+    Args:
+        data: input data
+        cutoff_freq: cutoff frequency
+        samplint_rate: sampling rate
+        order: order of the filter
+
+    Returns:
+        filtered_data: filtered data with the same shape as the input data (np.ndarray)
+    """
+    nyquist = 0.5 * samplint_rate
+    normal_cutoff = cutoff_freq / nyquist
+    b, a = signal.butter(order, normal_cutoff, btype="low", analog=False)
+    filtered_data = signal.lfilter(b, a, data, axis=0)
+    if not isinstance(filtered_data, np.ndarray):
+        raise ValueError("filtered_data is not np.ndarray")
+    return filtered_data
+
+
+def mu_law_encoding(data: npt.NDArray[np.floating], mu: int) -> npt.NDArray[np.floating]:
+    mu_x = np.sign(data) * np.log(1 + mu * np.abs(data)) / np.log(1 + mu)
+    return mu_x
+
+
+def quantize_data(data: npt.NDArray[np.floating], classes: int) -> npt.NDArray[np.floating]:
+    mu_x = mu_law_encoding(data, classes)
+    return mu_x
+
+
+def preprocess_raw_signal(data: npt.NDArray[np.floating], classes: int = 256) -> npt.NDArray[np.floating]:
+    data = butter_lowpass_filter(data)
+    data = quantize_data(data, classes)
+    return data
 
 
 def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) -> np.ndarray:
@@ -78,6 +124,7 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
     eeg = pd.read_parquet(parquet_fp)
     if offset is None:
         offset = (len(eeg) - 10_000) // 2
+
     eeg = eeg.iloc[offset : offset + 10_000]
 
     img = np.zeros((128, 256, 4), dtype=np.float32)
@@ -87,6 +134,9 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
         for kk in range(4):
             # Compute pair differences
             x = eeg[cols[kk]].to_numpy() - eeg[cols[kk + 1]].to_numpy()
+
+            # TODO: should we use the mean ?
+            # Replace nan with the mean
             m = float(np.nanmean(x))
             if np.isnan(x).mean() < 1:
                 x = np.nan_to_num(x, nan=m)
@@ -97,7 +147,14 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
 
             # Raw spectrogram
             mel_spec = librosa.feature.melspectrogram(
-                y=x, sr=200, hop_length=len(x) // 256, n_fft=1024, n_mels=128, fmin=0, fmax=20, win_length=128
+                y=x,
+                sr=200,
+                hop_length=len(x) // 256,
+                n_fft=1024,
+                n_mels=128,
+                fmin=0,
+                fmax=20,
+                win_length=128,
             )
 
             # Log transform
@@ -112,6 +169,39 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
         # average the 4 montage differences
         img[:, :, k] /= 4
     return img
+
+
+def load_eeg_from_parquet(fp: pathlib.Path, feature_columns: list[str]) -> npt.NDArray[np.float32]:
+    # extract middle 50 seconds
+    eeg = pl.read_parquet(fp, columns=feature_columns)
+    n_rows = len(eeg)
+    offset = (n_rows - 10_000) // 2
+    eeg = eeg[offset : offset + 10_000]
+
+    data = np.zeros((10_000, eeg.shape[1]), dtype=np.float32)
+    for col_idx, col in enumerate(feature_columns):
+        # TODO: should we use the mean ?
+        # fill nan with mean
+        x = eeg[col].to_numpy().astype(np.float32)
+        m = float(np.nanmean(x))
+        if np.isnan(x).mean() < 1:
+            x = np.nan_to_num(x, nan=m)
+        else:
+            x[:] = 0
+
+        data[:, col_idx] = x
+    return data
+
+
+def retrieve_eegs_from_parquet(
+    eeg_ids: Iterable[str], feature_cols: list[str], dir_path: pathlib.Path = constants.DATA_DIR / "train_eegs"
+) -> dict[str, npt.NDArray[np.float32]]:
+    retrieved_eegs = {}
+    for eeg_id in eeg_ids:
+        fp = dir_path / f"{eeg_id}.parquet"
+        eeg = load_eeg_from_parquet(fp, feature_columns=feature_cols)
+        retrieved_eegs[eeg_id] = eeg
+    return retrieved_eegs
 
 
 def real_kaggle_spectrogram(
@@ -227,8 +317,17 @@ def _test_load_spec() -> None:
     print(specs[list(specs.keys())[0]].shape)
 
 
+def _test_load_eeg() -> None:
+    print(" -- test_load_eeg")
+    fp = next(iter(constants.DATA_DIR.joinpath("train_eegs").glob("*.parquet")))
+    print(fp)
+    eeg = load_eeg_from_parquet(fp, constants.feature_cols)
+    print(f"{eeg.shape = }")
+
+
 def _test() -> None:
-    _test_load_spec()
+    # _test_load_spec()
+    _test_load_eeg()
 
 
 if __name__ == "__main__":

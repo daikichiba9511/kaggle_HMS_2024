@@ -11,7 +11,7 @@ from src.models import models
 
 logger = getLogger(__name__)
 
-ModelType = Literal["HMSModel"]
+ModelType = Literal["HMSModel", "HMSTransformer"]
 
 
 class HMSModelParams(TypedDict):
@@ -19,17 +19,27 @@ class HMSModelParams(TypedDict):
     pretrained: bool
 
 
-ModelParams: TypeAlias = HMSModelParams
+class HMSTransformerModelParams(TypedDict):
+    model_name: str
+    pretrained: bool
+
+
+ModelParams: TypeAlias = HMSModelParams | HMSTransformerModelParams
 
 
 class ModelConfig(Protocol):
     model_name: ModelType
-    model_params: HMSModelParams
+    model_params: ModelParams
 
 
 def init_model(model_name: ModelType, model_params: ModelParams) -> torch.nn.Module:
     if model_name == "HMSModel":
-        model = models.HMSModel(**model_params)
+        model = models.HMSModel(model_name=model_params["model_name"], pretrained=model_params["pretrained"])
+        return model
+    elif model_name == "HMSTransformer":
+        model = models.HMSTransformerModel(
+            model_name=model_params["model_name"], pretrained=model_params["pretrained"]
+        )
         return model
 
     else:
@@ -79,6 +89,9 @@ class Ensemble(nn.Module):
         return {"logits": preds}
 
 
+# ====================
+# Test
+# ====================
 def _test_init_model() -> None:
     model = init_model(
         model_name="HMSModel",

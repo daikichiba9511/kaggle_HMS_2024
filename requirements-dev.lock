@@ -697,7 +697,10 @@ torch==2.2.1
     # via monai
     # via pytorch-ignite
     # via timm
+    # via torchaudio
     # via torchvision
+torchaudio==2.2.1
+    # via hms-2024
 torchvision==0.17.1
     # via hms-2024
     # via lpips
