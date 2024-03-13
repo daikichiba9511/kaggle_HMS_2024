@@ -5,9 +5,9 @@ import pprint
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
+# import torch.nn as nn
+# import torch.nn.functional as F
 from src import constants, metrics
 from src.exp.exp001 import config as my_config
 from src.inference import tools as my_tools
@@ -28,19 +28,20 @@ def main() -> None:
     my_utils_common.seed_everything(cfg.seed)
     device = torch.device("cuda")
 
+    model_weights = [
+        # -- Exp001: mean oof score = 0.4823949817313776
+        pathlib.Path("output/exp001/best_exp001_fold0.pth"),
+        pathlib.Path("output/exp001/best_exp001_fold1.pth"),
+        pathlib.Path("output/exp001/best_exp001_fold2.pth"),
+        pathlib.Path("output/exp001/best_exp001_fold3.pth"),
+        pathlib.Path("output/exp001/best_exp001_fold4.pth"),
+    ]
+
     scores = []
     for fold in range(5):
         dl = my_data.init_valid_dataloader(fold, **cfg.valid_config.dataloader_params)
         models = []
-        model_weights = [
-            # -- Exp001: mean oof score = 0.4823949817313776
-            pathlib.Path("output/exp001/best_exp001_fold0.pth"),
-            pathlib.Path("output/exp001/best_exp001_fold1.pth"),
-            pathlib.Path("output/exp001/best_exp001_fold2.pth"),
-            pathlib.Path("output/exp001/best_exp001_fold3.pth"),
-            pathlib.Path("output/exp001/best_exp001_fold4.pth"),
-        ]
-        for i, model_weight in enumerate(model_weights):
+        for model_weight in model_weights:
             if f"{fold}" in model_weight.stem[-1]:
                 print(f"Skip fold={fold}, since it's in model_weight.stem {model_weight.stem}")
                 continue
