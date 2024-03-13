@@ -103,12 +103,14 @@ class HMSTransformerModel(nn.Module):
         x = torch.cat([spectrograms, eegs], dim=2)
         x = torch.cat([x, x, x], dim=3)
 
-        # region x {spectrogram, eeg} のスペクトログラムの貼り合わせ x 3 (channel direction)
-        # |-------------------|
-        # |    |    |    |    |
-        # |-------------------|
-        # |    |    |    |    |
-        # |-------------------|
+        # region x {spectrogram, eeg} のスペクトログラム(128, 256)の貼り合わせ x 3 (channel direction)
+        # |-----------|
+        # |  |  |  |  |
+        # |  |  |  |  |
+        # |-----------|
+        # |  |  |  |  |
+        # |  |  |  |  |
+        # |-----------|
         # shape: (bs, 3, 512, 512)
         x = x.permute(0, 3, 1, 2)
         return x

@@ -10,10 +10,12 @@ import pandas as pd
 import polars as pl
 from scipy import signal
 
-# from albumentations.pytorch import ToTensorV2
+# import cv2
 from tqdm.auto import tqdm
 
 from src import constants
+
+# from albumentations.pytorch import ToTensorV2
 
 logger = getLogger(__name__)
 
@@ -27,6 +29,51 @@ FEATS = [
     ["Fp2", "F8", "T4", "T6", "O2"],
     ["Fp2", "F4", "C4", "P4", "O2"],
 ]
+
+
+class Mixup:
+    def __init__(self, p: float = 0.5, alpha: float = 0.5) -> None:
+        self.p = p
+        self.alpha = alpha
+        self.lam = 1.0
+        self.do_mixup = False
+
+    def init_lambda(self) -> None:
+        if np.random.rand() < self.p:
+            self.do_mixup = True
+        else:
+            self.do_mixup = False
+
+        if self.do_mixup and self.alpha > 0.0:
+            self.lam = np.random.beta(self.alpha, self.alpha)
+        else:
+            self.lam = 1.0
+
+    def reset_lambda(self) -> None:
+        self.lam = 1.0
+
+
+def rand_bbox(width: int, height: int, lam: float) -> tuple[int, int, int, int]:
+    """Generate random bounding box.
+
+    Args:
+        width: Image width.
+        height: Image height.
+        lam: Lambda value.
+    """
+    cut_rate = np.sqrt(1.0 - lam)
+    cut_width = int(width * cut_rate)
+    cut_height = int(height * cut_rate)
+
+    # uniform sampling
+    cx = np.random.randint(width)
+    cy = np.random.randint(height)
+
+    bbx1 = np.clip(cx - cut_width // 2, 0, width)
+    bby1 = np.clip(cy - cut_height // 2, 0, height)
+    bbx2 = np.clip(cx + cut_width // 2, 0, width)
+    bby2 = np.clip(cy + cut_height // 2, 0, height)
+    return bbx1, bby1, bbx2, bby2
 
 
 def get_transforms(is_train: bool) -> A.Compose:
@@ -53,6 +100,7 @@ def get_transforms(is_train: bool) -> A.Compose:
             A.XYMasking(**params2, p=0.5),
             A.XYMasking(**params3, p=0.5),
             A.HorizontalFlip(p=0.5),
+            # A.VerticalFlip(p=0.5),
             A.OneOf([
                 A.XYMasking(mask_x_length=5, mask_y_length=16, num_masks_x=1, num_masks_y=1, fill_value=0, p=0.5),
                 A.CoarseDropout(max_holes=4),

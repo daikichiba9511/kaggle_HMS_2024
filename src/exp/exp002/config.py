@@ -14,7 +14,7 @@ from src.training import tools as my_tools
 class ModelConfigImpl(my_models_common.ModelConfig):
     model_name: my_models_common.ModelType = "HMSTransformer"
     model_params: my_models_common.ModelParams = dataclasses.field(
-        default_factory=lambda: my_models_common.HMSModelParams(
+        default_factory=lambda: my_models_common.HMSTransformerModelParams(
             pretrained=True,
             model_name="tf_efficientnet_b0.ns_jft_in1k",
         )
@@ -67,7 +67,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
 
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 8,
+            batch_size=8 * 1,
             num_workers=4,
             is_debug=False,
         )
@@ -78,7 +78,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
 class ValidConfigImpl(my_tools.ValidConfig):
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 8,
+            batch_size=8 * 1,
             num_workers=4,
             is_debug=False,
         )

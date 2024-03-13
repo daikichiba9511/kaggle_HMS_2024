@@ -14,7 +14,7 @@ from src.training import tools as my_tools
 class ModelConfigImpl(my_models_common.ModelConfig):
     model_name: my_models_common.ModelType = "HMSModel"
     model_params: my_models_common.ModelParams = dataclasses.field(
-        default_factory=lambda: my_models_common.HMSTransformerModelParams(
+        default_factory=lambda: my_models_common.HMSModelParams(
             pretrained=True,
             model_name="tf_efficientnet_b0.ns_jft_in1k",
         ),
