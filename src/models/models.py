@@ -134,10 +134,18 @@ class HMSTransformerModel(nn.Module):
 
 
 @dataclasses.dataclass
+class GRUParams:
+    hidden_size: int = 128
+    num_layers: int = 1
+
+
+@dataclasses.dataclass
 class HMS1DParallelConvParams:
     kernels: list[int]
     in_channels: int
     fixed_kernel_size: int
+
+    gru_params: GRUParams | None = GRUParams()
 
 
 class HMS1DParallelConvModel(nn.Module):
@@ -159,13 +167,22 @@ class HMS1DParallelConvModel(nn.Module):
             in_channels=fe_params.in_channels,
             fixed_kernel_size=fe_params.fixed_kernel_size,
         )
+        if fe_params.gru_params is not None:
+            params = fe_params.gru_params
+        else:
+            raise ValueError("gru_params is not set")
 
         self.detector = nn.GRU(
-            input_size=fe_params.in_channels, hidden_size=128, num_layers=1, batch_first=True, bidirectional=True
+            input_size=fe_params.in_channels,
+            hidden_size=params.hidden_size,
+            num_layers=params.num_layers,
+            batch_first=True,
+            bidirectional=True,
         )
 
         self.head = nn.Sequential(
-            nn.Linear(in_features=424, out_features=self.num_classes),
+            # nn.Linear(in_features=424, out_features=self.num_classes),
+            nn.Linear(in_features=232, out_features=self.num_classes),
         )
 
     def forward(self: Self, x: torch.Tensor) -> dict[str, torch.Tensor]:

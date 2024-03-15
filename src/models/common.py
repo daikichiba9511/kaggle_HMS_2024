@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.models import models as my_models
-from src.models.models import HMS1DParallelConvParams
+from src.models.models import GRUParams, HMS1DParallelConvParams
 
 logger = getLogger(__name__)
 

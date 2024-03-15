@@ -82,6 +82,10 @@ def _preprocess_raw_signal_for_eeg_dataset(data: npt.NDArray[np.floating]) -> np
     data = np.clip(data, -1024, 1024)
     data = np.nan_to_num(data, nan=0.0) / 32.0
 
+    # data = np.clip(data, np.exp(-4), np.exp(8))
+    # data = np.log(data)
+    # data = np.nan_to_num(data, nan=0.0)
+
     # to remove the noise and high frequency signals
     data = my_preprocessings.preprocess_raw_signal(data, classes=1)
     return data
@@ -96,6 +100,7 @@ class TrainEEGOutput(TypedDict):
         smoothed value in [0, 1].
         order: see constants.TARGETS
     """
+    y_raw: torch.Tensor
     eeg_id: str
     spec_id: str
 
@@ -133,9 +138,13 @@ class TrainEEGDataset(torch_data.Dataset):
         y += 1 / 6
         y /= y.sum()
 
+        y = torch.tensor(y, dtype=torch.float32)
+        y_raw = torch.tensor(row[constants.TARGETS].to_numpy().astype(np.float32), dtype=torch.float32)
+
         return {
             "x": x,
             "y": y,
+            "y_raw": y_raw,
             "eeg_id": row["eeg_id"],
             "spec_id": row["spec_id"],
         }

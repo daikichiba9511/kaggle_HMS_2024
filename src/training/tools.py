@@ -358,6 +358,8 @@ def train_one_fold(
             use_amp=cfg.train_config.use_amp,
             device=device,
         )
+        if wandb.run is not None and "lr" in train_results:
+            wandb.log({"lr": train_results["lr"]})
         if valid_one_epoch is not None and dl_valid is not None:
             valid_results = valid_one_epoch(
                 epoch=epoch,

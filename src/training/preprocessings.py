@@ -145,7 +145,15 @@ def quantize_data(data: npt.NDArray[np.floating], classes: int) -> npt.NDArray[n
     return mu_x
 
 
+def min_max_normalization(data: npt.NDArray[np.floating], eps: float = 1e-6) -> npt.NDArray[np.floating]:
+    mean = data.mean()
+    std = data.std()
+    data = (data - mean) / (std + eps)
+    return data
+
+
 def preprocess_raw_signal(data: npt.NDArray[np.floating], classes: int = 256) -> npt.NDArray[np.floating]:
+    # data = min_max_normalization(data)
     data = butter_lowpass_filter(data)
     data = quantize_data(data, classes)
     return data
