@@ -12,12 +12,14 @@ from src.training import tools as my_tools
 
 @dataclasses.dataclass
 class ModelConfigImpl(my_models_common.ModelConfig):
-    model_name: my_models_common.ModelType = "HMSTransformer"
+    model_name: my_models_common.ModelType = "HMS1DParallelConv"
     model_params: my_models_common.ModelParams = dataclasses.field(
-        default_factory=lambda: my_models_common.HMSTransformerModelParams(
-            pretrained=True,
-            model_name="tf_efficientnet_b0.ns_jft_in1k",
-        )
+        default_factory=lambda: my_models_common.HMS1DParallelConvParams(
+            # kernels=[3, 5, 7, 9],
+            kernels=[15, 21, 35, 64],
+            in_channels=20,
+            fixed_kernel_size=25,
+        ),
     )
 
 
@@ -38,14 +40,14 @@ class TrainConfigImpl(my_tools.TrainConfig):
     scheduler_name: my_optim.SchdulerType = "CosineLRScheduler"
     scheduler_params: my_optim.SchduleParams = dataclasses.field(
         default_factory=lambda: cast(
-            my_optim.SchduleParams,
+            my_optim.CosineLRSchedulerParams,
             dict(
-                t_initial=10,
+                t_initial=1,
                 lr_min=1e-6,
                 warmup_prefix=False,
                 warmup_t=1,
                 warmup_lr_init=1e-6,
-                cycle_limit=10,
+                cycle_limit=15,
             ),
         )
     )
@@ -67,8 +69,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
 
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 1,  # VRAM 15GB
-            # batch_size=8 * 2,
+            batch_size=8 * 8,
             num_workers=4,
             is_debug=False,
         )
@@ -79,8 +80,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
 class ValidConfigImpl(my_tools.ValidConfig):
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 1,  # VRAM 15GB
-            # batch_size=8 * 2,
+            batch_size=8 * 8,
             num_workers=4,
             is_debug=False,
         )
@@ -89,7 +89,11 @@ class ValidConfigImpl(my_tools.ValidConfig):
 
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
-    name: str = "exp002"
+    """try to use HMSParallelConvModel + longer kernel size
+    base: 005
+    """
+
+    name: str = "exp006"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name
 

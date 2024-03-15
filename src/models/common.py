@@ -1,17 +1,18 @@
 import dataclasses
 import pathlib
 from logging import getLogger
-from typing import Literal, Protocol, TypeAlias, TypedDict, TypeVar, cast
+from typing import Literal, Protocol, TypeAlias, TypeVar, cast
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.models import models
+from src.models import models as my_models
+from src.models.models import HMS1DParallelConvParams
 
 logger = getLogger(__name__)
 
-ModelType = Literal["HMSModel", "HMSTransformer"]
+ModelType = Literal["HMSModel", "HMSTransformer", "HMS1DParallelConv"]
 
 
 @dataclasses.dataclass
@@ -26,7 +27,7 @@ class HMSTransformerModelParams:
     pretrained: bool
 
 
-ModelParams: TypeAlias = HMSModelParams | HMSTransformerModelParams
+ModelParams: TypeAlias = HMSModelParams | HMSTransformerModelParams | my_models.HMS1DParallelConvParams
 
 
 class ModelConfig(Protocol):
@@ -35,31 +36,19 @@ class ModelConfig(Protocol):
 
 
 def init_model(model_name: ModelType, model_params: ModelParams) -> nn.Module:
-    match model_name, model_params:
-        case "HMSModel", HMSModelParams(model_name=model_params.model_name, pretrained=model_params.pretrained):
-            model = models.HMSModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
-            return model
-        case "HMSTransformer", HMSTransformerModelParams(
-            model_name=model_params.model_name, pretrained=model_params.pretrained
-        ):
-            model = models.HMSTransformerModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
-            return model
-        case _:
-            raise NotImplementedError(
-                f"model_name={model_name} x model_params={model_params} is not supported. Please implement the model"
-            )
-
-    # if model_name == "HMSModel":
-    #     model = models.HMSModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
-    #     return model
-    # elif model_name == "HMSTransformer":
-    #     model = models.HMSTransformerModel(
-    #         model_name=model_params["model_name"], pretrained=model_params["pretrained"]
-    #     )
-    #     return model
-
-    # else:
-    #     raise NotImplementedError(f"model_name={model_name} is not supported. Please implement the model.")
+    if model_name == "HMSModel" and isinstance(model_params, HMSModelParams):
+        model = my_models.HMSModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
+        return model
+    elif model_name == "HMSTransformer" and isinstance(model_params, HMSTransformerModelParams):
+        model = my_models.HMSTransformerModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
+        return model
+    elif model_name == "HMS1DParallelConv" and isinstance(model_params, HMS1DParallelConvParams):
+        model = my_models.HMS1DParallelConvModel(model_params)
+        return model
+    else:
+        raise NotImplementedError(
+            f"model_name={model_name} x model_params={model_params} is not supported. Please implement the model"
+        )
 
 
 @dataclasses.dataclass
@@ -127,11 +116,7 @@ def _test_init_model() -> None:
     )
     print(type(model))
 
-
-
-def _test_load_model() -> None:
-    model = load_model(
-        weights_fp=pathlib.Path("output/exp001/last_exp001_fold0.pth"),
+    model = init_model(
         model_name="HMSModel",
         model_params=HMSModelParams(
             model_name="tf_efficientnet_b0.ns_jft_in1k",

@@ -17,7 +17,7 @@ class ModelConfigImpl(my_models_common.ModelConfig):
         default_factory=lambda: my_models_common.HMSTransformerModelParams(
             pretrained=True,
             model_name="tf_efficientnet_b0.ns_jft_in1k",
-        )
+        ),
     )
 
 
@@ -67,8 +67,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
 
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 1,  # VRAM 15GB
-            # batch_size=8 * 2,
+            batch_size=8 * 1,
             num_workers=4,
             is_debug=False,
         )
@@ -79,8 +78,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
 class ValidConfigImpl(my_tools.ValidConfig):
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 1,  # VRAM 15GB
-            # batch_size=8 * 2,
+            batch_size=8 * 2,
             num_workers=4,
             is_debug=False,
         )
@@ -89,7 +87,13 @@ class ValidConfigImpl(my_tools.ValidConfig):
 
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
-    name: str = "exp002"
+    """Exp 004:
+
+    base: exp003
+    changes: use transformer model
+    """
+
+    name: str = "exp004"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name
 

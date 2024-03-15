@@ -124,6 +124,7 @@ class TrainEEGDataset(torch_data.Dataset):
         data = self.eegs[row["eeg_id"]]
         data = _preprocess_raw_signal_for_eeg_dataset(data)
         x = torch.tensor(data, dtype=torch.float32)
+        x = x.permute(1, 0)
 
         if self.transform is not None:
             x = self.transform(image=x)["image"]
@@ -242,6 +243,7 @@ class ValidEEGDataset(torch_data.Dataset):
         data = self.eegs[row["eeg_id"]]
         data = _preprocess_raw_signal_for_eeg_dataset(data)
         x = torch.tensor(data, dtype=torch.float32)
+        x = x.permute(1, 0)
 
         y = row[constants.TARGETS].to_numpy().astype(np.float32)
         y += 1 / 6
@@ -331,7 +333,7 @@ def _load_specs_from_eeg() -> dict[str, np.ndarray]:
 
 def init_train_dataloader(
     fold: int, batch_size: int = 8 * 3, num_workers: int = 4, is_debug: bool = False, remake_specs: bool = False
-) -> torch_data.DataLoader:
+) -> torch_data.DataLoader[TrainEEGOutput]:
     train_df = load_train_df(fold)
     # spectrograms was prepared by the host
     # spec_id -> spectrogram
@@ -371,7 +373,7 @@ def init_train_dataloader(
 
 def init_valid_dataloader(
     fold: int, batch_size: int = 8 * 3, num_workers: int = 4, is_debug: bool = False, remake_specs: bool = False
-) -> torch_data.DataLoader:
+) -> torch_data.DataLoader[ValidEEGOutput]:
     valid_df = load_valid_df(fold)
     if is_debug:
         spec_ids = valid_df["spec_id"].to_list()[:20]
@@ -424,10 +426,16 @@ def _test_train_dl() -> None:
 
 
 def _test_train_eeg_ds() -> None:
+    from torch.utils import data as torch_data
+
+    from src import constants
+    from src.training import preprocessings as my_preprocessings
+    from src.utils import common as my_utils_common
+
     df = load_train_df(fold=0)
     eegs = my_preprocessings.retrieve_eegs_from_parquet(df["eeg_id"].unique().to_list(), constants.feature_cols)
     ds = TrainEEGDataset(df=df.to_pandas(use_pyarrow_extension_array=True), eegs=eegs, transform=None)
-    dl = torch_data.DataLoader[TrainEEGOutput](
+    dl: torch_data.DataLoader[TrainEEGOutput] = torch_data.DataLoader(
         dataset=ds,
         batch_size=2,
         shuffle=True,
@@ -439,7 +447,7 @@ def _test_train_eeg_ds() -> None:
         persistent_workers=True,
     )
 
-    batch: TrainEEGOutput = next(iter(dl))
+    batch = next(iter(dl))
     print(f"{batch.keys() = }")
     print(f"{batch['x'].shape = }")
     print(f"{batch['y'].shape = }")

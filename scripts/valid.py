@@ -9,7 +9,11 @@ import torch
 # import torch.nn as nn
 # import torch.nn.functional as F
 from src import constants, metrics
-from src.exp.exp001 import config as my_config
+
+# from src.exp.exp001 import config as my_config
+# from src.exp.exp002 import config as my_config
+# from src.exp.exp003 import config as my_config
+from src.exp.exp004 import config as my_config
 from src.inference import tools as my_tools
 from src.models import common as my_models_common
 from src.training import data as my_data
@@ -21,7 +25,7 @@ logger = my_utils_logger.get_root_logger()
 
 def main() -> None:
     cfg = my_config.ConfigImpl()
-    cfg.model_config.model_params.pretrained = False
+    # cfg.model_config.model_params.pretrained = False
     cfg.valid_config.dataloader_params["is_debug"] = True
 
     logger.info(f"{pprint.pformat(dataclasses.asdict(cfg))}")
@@ -30,11 +34,29 @@ def main() -> None:
 
     model_weights = [
         # -- Exp001: mean oof score = 0.4823949817313776
-        pathlib.Path("output/exp001/best_exp001_fold0.pth"),
-        pathlib.Path("output/exp001/best_exp001_fold1.pth"),
-        pathlib.Path("output/exp001/best_exp001_fold2.pth"),
-        pathlib.Path("output/exp001/best_exp001_fold3.pth"),
-        pathlib.Path("output/exp001/best_exp001_fold4.pth"),
+        # pathlib.Path("output/exp001/best_exp001_fold0.pth"),
+        # pathlib.Path("output/exp001/best_exp001_fold1.pth"),
+        # pathlib.Path("output/exp001/best_exp001_fold2.pth"),
+        # pathlib.Path("output/exp001/best_exp001_fold3.pth"),
+        # pathlib.Path("output/exp001/best_exp001_fold4.pth"),
+        # -- Exp002: mean oof score = 0.38010893564018833
+        # pathlib.Path("output/exp002/best_exp002_fold0.pth"),
+        # pathlib.Path("output/exp002/best_exp002_fold1.pth"),
+        # pathlib.Path("output/exp002/best_exp002_fold2.pth"),
+        # pathlib.Path("output/exp002/best_exp002_fold3.pth"),
+        # pathlib.Path("output/exp002/best_exp002_fold4.pth"),
+        # -- Exp003: mean oof score = 0.49379023590927035
+        # pathlib.Path("output/exp003/best_exp003_fold0.pth"),
+        # pathlib.Path("output/exp003/best_exp003_fold1.pth"),
+        # pathlib.Path("output/exp003/best_exp003_fold2.pth"),
+        # pathlib.Path("output/exp003/best_exp003_fold3.pth"),
+        # pathlib.Path("output/exp003/best_exp003_fold4.pth"),
+        # -- Exp004: mean oof score = 0.3813732284941517
+        pathlib.Path("output/exp004/best_exp004_fold0.pth"),
+        pathlib.Path("output/exp004/best_exp004_fold1.pth"),
+        pathlib.Path("output/exp004/best_exp004_fold2.pth"),
+        pathlib.Path("output/exp004/best_exp004_fold3.pth"),
+        pathlib.Path("output/exp004/best_exp004_fold4.pth"),
     ]
 
     scores = []

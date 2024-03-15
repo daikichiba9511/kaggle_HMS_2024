@@ -1,4 +1,4 @@
-from typing import TypedDict
+import dataclasses
 
 import timm
 import torch
@@ -133,37 +133,39 @@ class HMSTransformerModel(nn.Module):
         return out
 
 
-class FeParams(TypedDict):
+@dataclasses.dataclass
+class HMS1DParallelConvParams:
     kernels: list[int]
     in_channels: int
     fixed_kernel_size: int
 
 
-class HMS1DFEModel(nn.Module):
-    def __init__(self: Self, fe_params: FeParams) -> None:
+class HMS1DParallelConvModel(nn.Module):
+    def __init__(self: Self, fe_params: HMS1DParallelConvParams) -> None:
         """
 
         Args:
-            fe_params (FeParams):
-                kernels (list[int]): list of kernel size to extract features
-                in_channels (int): input channel size
-                fixed_kernel_size (int): fixed kernel size
-            detect_input_feature_size (int): [description]
+            fe_params:
+
+                * kernels (list[int]): list of kernel size to extract features
+                * in_channels (int): input channel size
+                * fixed_kernel_size (int): fixed kernel size
+
         """
         super().__init__()
         self.num_classes = 6
         self.fe = my_feature_extractor.Parallel1DConvFeatureExtractor(
-            kernels=fe_params["kernels"],
-            in_channels=fe_params["in_channels"],
-            fixed_kernel_size=fe_params["fixed_kernel_size"],
+            kernels=fe_params.kernels,
+            in_channels=fe_params.in_channels,
+            fixed_kernel_size=fe_params.fixed_kernel_size,
         )
 
         self.detector = nn.GRU(
-            input_size=fe_params["in_channels"], hidden_size=128, num_layers=1, batch_first=True, bidirectional=True
+            input_size=fe_params.in_channels, hidden_size=128, num_layers=1, batch_first=True, bidirectional=True
         )
 
         self.head = nn.Sequential(
-            nn.Linear(in_features=304, out_features=self.num_classes),
+            nn.Linear(in_features=424, out_features=self.num_classes),
         )
 
     def forward(self: Self, x: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -219,20 +221,21 @@ def _test_hms_transformer() -> None:
 
 def _test_hms_1dfe_model() -> None:
     print("-- test_hms_1dfe_model --")
-    fe_params: FeParams = {
-        "kernels": [3, 5, 7, 9],
-        "in_channels": 1,
-        "fixed_kernel_size": 5,
-    }
-    model = HMS1DFEModel(fe_params)
-    input = torch.rand(2, fe_params["in_channels"], 2500)
+    fe_params = HMS1DParallelConvParams(
+        kernels=[3, 5, 7, 9],
+        in_channels=1,
+        fixed_kernel_size=5,
+    )
+
+    model = HMS1DParallelConvModel(fe_params)
+    input = torch.rand(2, fe_params.in_channels, 2500)
     out = model(input)
     print(out["logits"].shape)
 
 
 def _test() -> None:
-    _test_hms()
-    _test_hms_transformer()
+    # _test_hms()
+    # _test_hms_transformer()
     _test_hms_1dfe_model()
 
 

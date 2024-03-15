@@ -63,6 +63,84 @@ class Res1DBlock(nn.Module):
         return out
 
 
+class SELayer(nn.Module):
+    def __init__(self, in_channels: int, reduction: int = 16) -> None:
+        super().__init__()
+        # ndim=2/3 => 1d, ndim=4 => 2d
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(in_channels, in_channels // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(in_channels // reduction, in_channels, bias=False),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c = x.shape[0], x.shape[1]
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
+
+
+class SERes1DBlock(nn.Module):
+    def __init__(
+        self: Self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int,
+        padding: int,
+        downsampling: nn.Module,
+        reduction: int = 16,
+        dropout_prob: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.bn1 = nn.BatchNorm1d(in_channels)
+        self.relu = nn.ReLU(inplace=False)
+        self.dropout = nn.Dropout(dropout_prob, inplace=False)
+        self.conv1d1 = nn.Conv1d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=False,
+        )
+        self.bn2 = nn.BatchNorm1d(out_channels)
+        self.conv1d2 = nn.Conv1d(
+            in_channels=out_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=False,
+        )
+        self.pool = nn.MaxPool1d(kernel_size=2, stride=2, padding=0)
+        self.downsampling = downsampling
+        self.se = SELayer(in_channels=out_channels, reduction=reduction)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        identity = x
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.conv1d1(x)
+
+        x = self.bn2(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.conv1d2(x)
+        out = self.pool(x)
+
+        out = self.se(out.unsqueeze(-1))
+        out = out.squeeze(-1)
+
+        # skip connection
+        identity = self.downsampling(identity)
+        out += identity
+        return out
+
+
 class Parallel1DConvFeatureExtractor(nn.Module):
     def __init__(self: Self, kernels: list[int], in_channels: int = 20, fixed_kernel_size: int = 17) -> None:
         super().__init__()
@@ -399,7 +477,32 @@ def _test_parallel_1dconv_fe() -> None:
     print(o.shape)
 
 
+def _test_seres1dblock() -> None:
+    in_channels = 3
+    out_channels = 3
+    kernel_size = 3
+    stride = 1
+    padding = 1
+    downsampling = nn.MaxPool1d(kernel_size=2, stride=2, padding=0)
+    reduction = 16
+    dropout_prob = 0.0
+    input = torch.rand(2, in_channels, 2500)
+    fe = SERes1DBlock(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        downsampling=downsampling,
+        reduction=reduction,
+        dropout_prob=dropout_prob,
+    )
+    o = fe(input)
+    print(o.shape)
+
+
 if __name__ == "__main__":
     # _test_spec_feature_extractor()
     # _test_cnn_feature_extractor()
     _test_parallel_1dconv_fe()
+    # _test_seres1dblock()
