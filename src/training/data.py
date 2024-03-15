@@ -79,12 +79,14 @@ class TrainHMSDataset(torch_data.Dataset):
 
 
 def _preprocess_raw_signal_for_eeg_dataset(data: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-    data = np.clip(data, -1024, 1024)
-    data = np.nan_to_num(data, nan=0.0) / 32.0
+    # exp007,008
+    # data = np.clip(data, -1024, 1024)
+    # data = np.nan_to_num(data, nan=0.0) / 32.0
 
-    # data = np.clip(data, np.exp(-4), np.exp(8))
-    # data = np.log(data)
-    # data = np.nan_to_num(data, nan=0.0)
+    # exp009
+    data = np.clip(data, np.exp(-4), np.exp(8))
+    data = np.log(data)
+    data = np.nan_to_num(data, nan=0.0)
 
     # to remove the noise and high frequency signals
     data = my_preprocessings.preprocess_raw_signal(data, classes=1)
