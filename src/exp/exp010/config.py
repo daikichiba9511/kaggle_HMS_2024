@@ -16,12 +16,13 @@ class ModelConfigImpl(my_models_common.ModelConfig):
     model_params: my_models_common.ModelParams = dataclasses.field(
         default_factory=lambda: my_models_common.HMS1DParallelConvParams(
             # kernels=[3, 5, 7, 9],
-            kernels=[15, 21, 35, 64],
+            # kernels=[15, 21, 35, 64],
+            kernels=[21, 32, 64, 128],
             in_channels=20,
             fixed_kernel_size=25,
             gru_params=my_models_common.GRUParams(
-                hidden_size=32,
-                num_layers=6,
+                hidden_size=64,
+                num_layers=4,
             ),
         ),
     )
@@ -93,11 +94,11 @@ class ValidConfigImpl(my_tools.ValidConfig):
 
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
-    """incresing the num layer to increase the receptive field
-    base: 007
+    """reduce num_layers and increase hidden_size and more longer kernel size
+    base: 009
     """
 
-    name: str = "exp008"
+    name: str = "exp010"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name
 

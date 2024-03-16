@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 
 import wandb
 from src import constants
-from src.exp.exp009 import config as my_config
+from src.exp.exp011 import config as my_config
 from src.training import data as my_data
 from src.training import losses as my_losses
 from src.training import preprocessings as my_preprocessings
@@ -182,10 +182,19 @@ def valid_one_epoch(
 
 
 def _init_train_dataloader(
-    fold: int, batch_size: int = 8 * 3, num_workers: int = 4, is_debug: bool = False, remake_specs: bool = False
+    fold: int,
+    batch_size: int = 8 * 3,
+    num_workers: int = 4,
+    is_debug: bool = False,
+    remake_specs: bool = False,
+    downsampling_rate: int = 1,
 ) -> torch_data.DataLoader[my_data.TrainEEGOutput]:
     df = my_data.load_train_df(fold=fold)
-    eegs = my_preprocessings.retrieve_eegs_from_parquet(df["eeg_id"].unique().to_list(), constants.feature_cols)
+    eegs = my_preprocessings.retrieve_eegs_from_parquet(
+        df["eeg_id"].unique().to_list(),
+        constants.feature_cols,
+        sampling_rate=downsampling_rate,
+    )
     ds = my_data.TrainEEGDataset(df=df.to_pandas(use_pyarrow_extension_array=True), eegs=eegs, transform=None)
     dl: torch_data.DataLoader[my_data.TrainEEGOutput] = torch_data.DataLoader(
         dataset=ds,

@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 
 import wandb
 from src import constants
-from src.exp.exp009 import config as my_config
+from src.exp.exp014 import config as my_config
 from src.training import data as my_data
 from src.training import losses as my_losses
 from src.training import preprocessings as my_preprocessings
@@ -182,11 +182,23 @@ def valid_one_epoch(
 
 
 def _init_train_dataloader(
-    fold: int, batch_size: int = 8 * 3, num_workers: int = 4, is_debug: bool = False, remake_specs: bool = False
+    fold: int,
+    batch_size: int = 8 * 3,
+    num_workers: int = 4,
+    is_debug: bool = False,
+    remake_specs: bool = False,
+    reduce_noise: bool = True,
+    channel_normalize: bool = True,
 ) -> torch_data.DataLoader[my_data.TrainEEGOutput]:
     df = my_data.load_train_df(fold=fold)
     eegs = my_preprocessings.retrieve_eegs_from_parquet(df["eeg_id"].unique().to_list(), constants.feature_cols)
-    ds = my_data.TrainEEGDataset(df=df.to_pandas(use_pyarrow_extension_array=True), eegs=eegs, transform=None)
+    ds = my_data.TrainEEGDataset(
+        df=df.to_pandas(use_pyarrow_extension_array=True),
+        eegs=eegs,
+        transform=None,
+        reduce_noise=reduce_noise,
+        channel_normalize=channel_normalize,
+    )
     dl: torch_data.DataLoader[my_data.TrainEEGOutput] = torch_data.DataLoader(
         dataset=ds,
         batch_size=batch_size,
@@ -202,11 +214,23 @@ def _init_train_dataloader(
 
 
 def _init_valid_dataloader(
-    fold: int, batch_size: int = 8 * 3, num_workers: int = 4, is_debug: bool = False, remake_specs: bool = False
+    fold: int,
+    batch_size: int = 8 * 3,
+    num_workers: int = 4,
+    is_debug: bool = False,
+    remake_specs: bool = False,
+    reduce_noise: bool = True,
+    channel_normalize: bool = True,
 ) -> torch_data.DataLoader[my_data.ValidEEGOutput]:
     df = my_data.load_valid_df(fold=fold)
     eegs = my_preprocessings.retrieve_eegs_from_parquet(df["eeg_id"].unique().to_list(), constants.feature_cols)
-    ds = my_data.ValidEEGDataset(df=df.to_pandas(use_pyarrow_extension_array=True), eegs=eegs, transform=None)
+    ds = my_data.ValidEEGDataset(
+        df=df.to_pandas(use_pyarrow_extension_array=True),
+        eegs=eegs,
+        transform=None,
+        reduce_noise=reduce_noise,
+        channel_normalize=channel_normalize,
+    )
     dl: torch_data.DataLoader[my_data.ValidEEGOutput] = torch_data.DataLoader(
         dataset=ds,
         batch_size=batch_size,

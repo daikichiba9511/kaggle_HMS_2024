@@ -442,8 +442,8 @@ def _test_cnn_feature_extractor() -> None:
     num_features = 3
     seq_len = 24 * 60 * 4
     # kernel_size = (32, 16, 4, 2)
-    kernel_size = (15, 7, 4, 3, 1)  # 短期的な関係を見る
-    # kernel_size = (64, 32, 15, 7)  # 長期的な関係を見る
+    # kernel_size = (15, 7, 4, 3, 1)  # 短期的な関係を見る
+    kernel_size = (128, 64, 32, 16, 8, 5)  # 長期的な関係を見る
     # base_filters = (128, 256)
     # base_filters = (256, 160, 128)  # spectrogramの高さ、周波数領域の解像度
     base_filters = 128  # spectrogramの高さ、周波数領域の解像度
@@ -478,8 +478,8 @@ def _test_parallel_1dconv_fe() -> None:
 
 
 def _test_seres1dblock() -> None:
-    in_channels = 3
-    out_channels = 3
+    in_channels = 20
+    out_channels = 10
     kernel_size = 3
     stride = 1
     padding = 1
@@ -503,6 +503,6 @@ def _test_seres1dblock() -> None:
 
 if __name__ == "__main__":
     # _test_spec_feature_extractor()
-    # _test_cnn_feature_extractor()
-    _test_parallel_1dconv_fe()
+    _test_cnn_feature_extractor()
+    # _test_parallel_1dconv_fe()
     # _test_seres1dblock()

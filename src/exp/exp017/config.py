@@ -12,16 +12,17 @@ from src.training import tools as my_tools
 
 @dataclasses.dataclass
 class ModelConfigImpl(my_models_common.ModelConfig):
-    model_name: my_models_common.ModelType = "HMS1DParallelConv"
+    model_name: my_models_common.ModelType = "HMS1DParallel2WayConv"
     model_params: my_models_common.ModelParams = dataclasses.field(
-        default_factory=lambda: my_models_common.HMS1DParallelConvParams(
+        default_factory=lambda: my_models_common.HMS1DParallel2WayConvParams(
             # kernels=[3, 5, 7, 9],
-            kernels=[15, 21, 35, 64],
+            short_kernels=[3, 5, 7, 9, 15],
+            long_kernels=[21, 32, 64, 128, 256],
             in_channels=20,
             fixed_kernel_size=25,
             gru_params=my_models_common.GRUParams(
-                hidden_size=32,
-                num_layers=6,
+                hidden_size=64,
+                num_layers=4,
             ),
         ),
     )
@@ -76,6 +77,10 @@ class TrainConfigImpl(my_tools.TrainConfig):
             batch_size=8 * 8,
             num_workers=4,
             is_debug=False,
+            reduce_noise=False,
+            channel_normalize=False,
+            sampling_rate=5,
+            sampling_type="post",
         )
     )
 
@@ -87,17 +92,21 @@ class ValidConfigImpl(my_tools.ValidConfig):
             batch_size=8 * 8,
             num_workers=4,
             is_debug=False,
+            reduce_noise=False,
+            channel_normalize=False,
+            sampling_rate=5,
+            sampling_type="post",
         )
     )
 
 
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
-    """incresing the num layer to increase the receptive field
-    base: 007
+    """reduce sample size （間引く）, sampling_rate=5
+    base: 014
     """
 
-    name: str = "exp008"
+    name: str = "exp017"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name
 

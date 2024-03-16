@@ -1,11 +1,14 @@
 import dataclasses
 
+from pandas.core.series import base
+from requests.models import encode_multipart_formdata
 import timm
 import torch
 import torch.nn as nn
 from typing_extensions import Self
 
 from src.models import feature_extractor as my_feature_extractor
+from src.models import layers as my_layers
 
 
 class HMSModel(nn.Module):
@@ -173,16 +176,100 @@ class HMS1DParallelConvModel(nn.Module):
             raise ValueError("gru_params is not set")
 
         self.detector = nn.GRU(
-            input_size=fe_params.in_channels,
+            input_size=1,
             hidden_size=params.hidden_size,
             num_layers=params.num_layers,
             batch_first=True,
             bidirectional=True,
         )
+        self.pooling_out_size = 256
+        self.pooling = nn.AdaptiveAvgPool1d(self.pooling_out_size)
 
+        head_size = 2 * params.hidden_size * self.pooling_out_size
         self.head = nn.Sequential(
-            # nn.Linear(in_features=424, out_features=self.num_classes),
-            nn.Linear(in_features=232, out_features=self.num_classes),
+            nn.Linear(in_features=head_size, out_features=self.num_classes),
+        )
+
+    def forward(self: Self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        """forward
+
+        Args:
+            x (torch.Tensor): input tensor, shape (bs, in_channels, time_steps)
+
+        Returns:
+            dict[str, torch.Tensor]:
+                logits: output tensor, shape (bs, num_classes)
+        """
+        bs = x.shape[0]
+        # shape: (bs, hidden_size1)
+        hidden = self.fe(x)
+
+        # detect_out shape: (bs, sequence_length, 2 * hidden_size)
+        detect_out, _ = self.detector(hidden.unsqueeze(-1))
+        # detect out shape: (bs, 2 * hidden_size, pooling_out_size)
+        detect_out = self.pooling(detect_out.permute(0, 2, 1))
+
+        out = detect_out.reshape(bs, -1)
+        logits = self.head(out)
+        return {"logits": logits}
+
+
+@dataclasses.dataclass
+class HMS1DParallel2WayConvParams:
+    short_kernels: list[int]
+    long_kernels: list[int]
+    in_channels: int
+    fixed_kernel_size: int
+
+    gru_params: GRUParams | None = GRUParams()
+
+
+class HMS1DParallel2WayConvModel(nn.Module):
+    def __init__(self: Self, fe_params: HMS1DParallel2WayConvParams) -> None:
+        """
+
+        Args:
+            fe_params:
+
+                * short_kernels (list[int]): list of kernel size to extract features
+                * long_kernels (list[int]): list of kernel size to extract features
+                * in_channels (int): input channel size
+                * fixed_kernel_size (int): fixed kernel size
+
+        """
+        super().__init__()
+        self.num_classes = 6
+        self.short_fe = my_feature_extractor.Parallel1DConvFeatureExtractor(
+            kernels=fe_params.short_kernels,
+            in_channels=fe_params.in_channels,
+            fixed_kernel_size=fe_params.fixed_kernel_size,
+        )
+        self.long_fe = my_feature_extractor.Parallel1DConvFeatureExtractor(
+            kernels=fe_params.long_kernels,
+            in_channels=fe_params.in_channels,
+            fixed_kernel_size=fe_params.fixed_kernel_size,
+        )
+        if fe_params.gru_params is not None:
+            params = fe_params.gru_params
+        else:
+            raise ValueError("gru_params is not set")
+
+        self.detector = nn.GRU(
+            # input_size=fe_params.in_channels,
+            input_size=1,
+            hidden_size=params.hidden_size,
+            num_layers=params.num_layers,
+            batch_first=True,
+            bidirectional=True,
+        )
+        self.pooling_out_size = 256
+        self.pooling = nn.AdaptiveAvgPool1d(self.pooling_out_size)
+
+        head_size = 2 * params.hidden_size * self.pooling_out_size
+        self.head = nn.Sequential(
+            # nn.LayerNorm(head_size),
+            nn.Dropout(0.5, inplace=True),
+            nn.Linear(in_features=head_size, out_features=self.num_classes),
         )
 
     def forward(self: Self, x: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -196,15 +283,80 @@ class HMS1DParallelConvModel(nn.Module):
                 logits: output tensor, shape (bs, num_classes)
         """
         # shape: (bs, hidden_size1)
-        hidden = self.fe(x)
+        short_hidden = self.short_fe(x)
+        long_hidden = self.long_fe(x)
 
-        detect_out, _ = self.detector(x.permute(0, 2, 1))
-        # 一番最後の状態だけ取り出す
-        # shape: (bs, hidden_size2)
-        detect_out = detect_out[:, -1, :]
+        # shape: (bs, hidden_size1 + hidden_size2, 1)
+        hidden = torch.cat([short_hidden, long_hidden], dim=1).unsqueeze(-1)
+        detect_out, _ = self.detector(hidden)
+        out = self.pooling(detect_out.permute(0, 2, 1)).reshape(x.shape[0], -1)
 
-        out = torch.cat([hidden, detect_out], dim=1)
+        # out = torch.cat([short_hidden, long_hidden, out], dim=1)
         logits = self.head(out)
+        return {"logits": logits}
+
+
+@dataclasses.dataclass
+class HMSCNNSpecFEParams:
+    in_channels: int = 4
+    base_filters: int = 128
+    kernel_size: tuple[int, ...] = (32, 16, 4, 2)
+    stride: int = 4
+    sigmoid: bool = False
+    output_size: int | None = None
+    reinit: bool = True
+    encoder_name: str = "tf_efficientnet_b0_ns"
+    encoder_pretrained: bool = True
+
+
+class HMSCNNSpecFEModel(nn.Module):
+    def __init__(self: Self, params: HMSCNNSpecFEParams) -> None:
+        super().__init__()
+        self.num_classes = 6
+        self.fe = my_feature_extractor.CNNSpectgram(
+            in_channels=params.in_channels,
+            base_filters=params.base_filters,
+            kernel_size=params.kernel_size,
+            stride=params.stride,
+            sigmoid=params.sigmoid,
+            output_size=params.output_size,
+            reinit=params.reinit,
+        )
+        self.encoder = timm.create_model(
+            params.encoder_name,
+            params.encoder_pretrained,
+            features_only=True,
+            in_chans=len(params.kernel_size),
+        )
+        self.pool = my_layers.GeM()
+        self.num_features = self.encoder.feature_info.channels()[-1]
+        self.head = nn.Sequential(
+            # nn.LayerNorm(self.num_features),
+            nn.Dropout(0.5, inplace=True),
+            nn.Linear(in_features=self.num_features, out_features=self.num_classes),
+        )
+
+    def forward(
+        self: Self, x: torch.Tensor, do_mixup: bool = False, lam: float | None = None
+    ) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            x: input tensor, shape (bs, in_channels, time_steps)
+        """
+
+        # shape: (bs, len(kernels), base_filters, time_steps//stride)
+        spec_img = self.fe(x)
+        if lam is not None and do_mixup:
+            x = lam * spec_img + (1.0 - lam) * spec_img.flip(0)
+
+        features = self.encoder(spec_img)
+        last_layer_feature = features[-1]
+
+        pooled_features = self.pool(last_layer_feature)
+        pooled_features = pooled_features.view(x.shape[0], -1)
+
+        logits = self.head(pooled_features)
+
         return {"logits": logits}
 
 
@@ -240,20 +392,55 @@ def _test_hms_1dfe_model() -> None:
     print("-- test_hms_1dfe_model --")
     fe_params = HMS1DParallelConvParams(
         kernels=[3, 5, 7, 9],
-        in_channels=1,
+        in_channels=20,
         fixed_kernel_size=5,
     )
 
     model = HMS1DParallelConvModel(fe_params)
-    input = torch.rand(2, fe_params.in_channels, 2500)
+    input = torch.rand(2, fe_params.in_channels, 10000)
     out = model(input)
     print(out["logits"].shape)
+
+
+def _test_hms_1d_parallel_2way_conv() -> None:
+    print("-- test_hms_1d_paralell_2way_conv --")
+    fe_params = HMS1DParallel2WayConvParams(
+        short_kernels=[3, 5, 7, 9],
+        long_kernels=[128, 64, 32, 16],
+        in_channels=20,
+        fixed_kernel_size=5,
+    )
+
+    model = HMS1DParallel2WayConvModel(fe_params)
+    input = torch.rand(2, fe_params.in_channels, 10000)
+    out = model(input)
+    print(out["logits"].shape)
+
+
+def _test_hms_cnn_spec_fe() -> None:
+    print("-- test_hms_cnn_spec_fe --")
+    fe_params = HMSCNNSpecFEParams(
+        in_channels=20,
+        base_filters=128,
+        kernel_size=(32, 16, 4, 2),
+        stride=4,
+        sigmoid=False,
+        output_size=None,
+        reinit=True,
+        encoder_name="tf_efficientnet_b0.ns_jft_in1k",
+        encoder_pretrained=True,
+    )
+    model = HMSCNNSpecFEModel(fe_params)
+    input = torch.rand(2, fe_params.in_channels, 10000)
+    print(f"{input.shape = }")
+    out = model(input)
+    print(f"{out['logits'].shape = }")
 
 
 def _test() -> None:
     # _test_hms()
     # _test_hms_transformer()
-    _test_hms_1dfe_model()
+    _test_hms_cnn_spec_fe()
 
 
 if __name__ == "__main__":

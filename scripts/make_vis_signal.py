@@ -11,7 +11,7 @@ from src.utils import common as my_utils_common
 
 plt.style.use("ggplot")
 
-SAVE_DIR = pathlib.Path("output/visualizations/signals_of_train_eeg_dataset")
+SAVE_DIR = pathlib.Path("output/visualizations_009/signals_of_train_eeg_dataset")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 df = my_data.load_train_df(fold=0)
@@ -28,9 +28,9 @@ dl = torch_data.DataLoader(
     worker_init_fn=lambda _: my_utils_common.seed_everything(42),
 )
 
-# target_idx = 0
+target_idx = 0
 # target_idx = 1
-target_idx = 2
+# target_idx = 2
 target_col = constants.TARGETS[target_idx]
 cnt = 0
 for _, batch in enumerate(dl):

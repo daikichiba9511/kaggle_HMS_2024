@@ -46,12 +46,12 @@ class TrainConfigImpl(my_tools.TrainConfig):
         default_factory=lambda: cast(
             my_optim.CosineLRSchedulerParams,
             dict(
-                t_initial=1,
+                t_initial=15,
                 lr_min=1e-6,
                 warmup_prefix=False,
                 warmup_t=1,
                 warmup_lr_init=1e-6,
-                cycle_limit=15,
+                cycle_limit=1,
             ),
         )
     )

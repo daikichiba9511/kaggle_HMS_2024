@@ -8,11 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.models import models as my_models
-from src.models.models import GRUParams, HMS1DParallelConvParams
+from src.models.models import GRUParams, HMS1DParallel2WayConvParams, HMS1DParallelConvParams, HMSCNNSpecFEParams
 
 logger = getLogger(__name__)
 
-ModelType = Literal["HMSModel", "HMSTransformer", "HMS1DParallelConv"]
+ModelType = Literal["HMSModel", "HMSTransformer", "HMS1DParallelConv", "HMS1DParallel2WayConv", "HMSCNNSpecFEModel"]
 
 
 @dataclasses.dataclass
@@ -27,7 +27,13 @@ class HMSTransformerModelParams:
     pretrained: bool
 
 
-ModelParams: TypeAlias = HMSModelParams | HMSTransformerModelParams | my_models.HMS1DParallelConvParams
+ModelParams: TypeAlias = (
+    HMSModelParams
+    | HMSTransformerModelParams
+    | my_models.HMS1DParallelConvParams
+    | my_models.HMS1DParallel2WayConvParams
+    | my_models.HMSCNNSpecFEParams
+)
 
 
 class ModelConfig(Protocol):
@@ -44,6 +50,12 @@ def init_model(model_name: ModelType, model_params: ModelParams) -> nn.Module:
         return model
     elif model_name == "HMS1DParallelConv" and isinstance(model_params, HMS1DParallelConvParams):
         model = my_models.HMS1DParallelConvModel(model_params)
+        return model
+    elif model_name == "HMS1DParallel2WayConv" and isinstance(model_params, HMS1DParallel2WayConvParams):
+        model = my_models.HMS1DParallel2WayConvModel(model_params)
+        return model
+    elif model_name == "HMSCNNSpecFEModel" and isinstance(model_params, HMSCNNSpecFEParams):
+        model = my_models.HMSCNNSpecFEModel(model_params)
         return model
     else:
         raise NotImplementedError(

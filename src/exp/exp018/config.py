@@ -12,17 +12,15 @@ from src.training import tools as my_tools
 
 @dataclasses.dataclass
 class ModelConfigImpl(my_models_common.ModelConfig):
-    model_name: my_models_common.ModelType = "HMS1DParallelConv"
+    model_name: my_models_common.ModelType = "HMSCNNSpecFEModel"
     model_params: my_models_common.ModelParams = dataclasses.field(
-        default_factory=lambda: my_models_common.HMS1DParallelConvParams(
-            # kernels=[3, 5, 7, 9],
-            kernels=[15, 21, 35, 64],
+        default_factory=lambda: my_models_common.HMSCNNSpecFEParams(
             in_channels=20,
-            fixed_kernel_size=25,
-            gru_params=my_models_common.GRUParams(
-                hidden_size=32,
-                num_layers=6,
-            ),
+            base_filters=128,
+            kernel_size=(128, 64, 32, 16, 8),
+            stride=4,
+            encoder_name="tf_efficientnet_b0.ns_jft_in1k",
+            encoder_pretrained=True,
         ),
     )
 
@@ -37,7 +35,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
             dict(
                 lr=1e-4,
                 weight_decay=1e-2,
-                eps=1e-8,
+                eps=1e-6,
             ),
         )
     )
@@ -76,6 +74,8 @@ class TrainConfigImpl(my_tools.TrainConfig):
             batch_size=8 * 8,
             num_workers=4,
             is_debug=False,
+            reduce_noise=False,
+            channel_normalize=False,
         )
     )
 
@@ -87,17 +87,19 @@ class ValidConfigImpl(my_tools.ValidConfig):
             batch_size=8 * 8,
             num_workers=4,
             is_debug=False,
+            reduce_noise=False,
+            channel_normalize=False,
         )
     )
 
 
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
-    """incresing the num layer to increase the receptive field
-    base: 007
+    """use HMS-CNN with SpecFE model
+    base: 014
     """
 
-    name: str = "exp008"
+    name: str = "exp018"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name
 

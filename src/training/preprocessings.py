@@ -152,10 +152,19 @@ def min_max_normalization(data: npt.NDArray[np.floating], eps: float = 1e-6) -> 
     return data
 
 
-def preprocess_raw_signal(data: npt.NDArray[np.floating], classes: int = 256) -> npt.NDArray[np.floating]:
-    # data = min_max_normalization(data)
-    data = butter_lowpass_filter(data)
-    data = quantize_data(data, classes)
+def preprocess_raw_signal(
+    data: npt.NDArray[np.floating], classes: int = 256, reduce_noise: bool = False, channel_normalize: bool = True
+) -> npt.NDArray[np.floating]:
+    if channel_normalize:
+        # normalize data at each channel
+        for i in range(data.shape[1]):
+            data[i] = min_max_normalization(data[i])
+    else:
+        data = min_max_normalization(data)
+
+    if reduce_noise:
+        data = butter_lowpass_filter(data)
+        data = quantize_data(data, classes)
     return data
 
 
@@ -227,12 +236,26 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
     return img
 
 
-def load_eeg_from_parquet(fp: pathlib.Path, feature_columns: list[str]) -> npt.NDArray[np.float32]:
-    # extract middle 50 seconds
+def load_eeg_from_parquet(
+    fp: pathlib.Path, feature_columns: list[str], sampling_type: str = "normal", sampling_rate: int = 1
+) -> npt.NDArray[np.float32]:
+    # TODO: extract the middle of the data like 50 seconds or 10 seconds,
+    # or extract the middle 50 seconds of the data and then downsampling
+    # For example, it extract data at every 4th sample, 50 seconds = 2000 samples
+    #
+    # extract middle 50 seconds = 10_000 samples
+    # extract middle 10 seconds = 2000 samples
+    if sampling_type == "normal":
+        sample_size = 10_000 // sampling_rate
+    else:
+        sample_size = 10_000
     eeg = pl.read_parquet(fp, columns=feature_columns)
     n_rows = len(eeg)
-    offset = (n_rows - 10_000) // 2
-    eeg = eeg[offset : offset + 10_000]
+    offset = (n_rows - sample_size) // 2
+    eeg = eeg[offset : offset + sample_size]
+    if sampling_type == "post":
+        sample_size = 10_000 // sampling_rate
+        eeg = eeg[::sampling_rate]
 
     data = np.zeros((10_000, eeg.shape[1]), dtype=np.float32)
     for col_idx, col in enumerate(feature_columns):
@@ -249,13 +272,64 @@ def load_eeg_from_parquet(fp: pathlib.Path, feature_columns: list[str]) -> npt.N
     return data
 
 
+def load_eeg_from_parquet2(
+    fp: pathlib.Path, feature_columns: list[str], sampling_type: str = "normal", sampling_rate: int = 1
+) -> npt.NDArray[np.float32]:
+    # TODO: extract the middle of the data like 50 seconds or 10 seconds,
+    # or extract the middle 50 seconds of the data and then downsampling
+    # For example, it extract data at every 4th sample, 50 seconds = 2000 samples
+    #
+    # extract middle 50 seconds = 10_000 samples
+    # extract middle 10 seconds = 2000 samples
+    if sampling_type == "normal":
+        sample_size = 10_000 // sampling_rate
+    else:
+        sample_size = 10_000
+    eeg = pl.read_parquet(fp, columns=feature_columns)
+    n_rows = len(eeg)
+    offset = (n_rows - sample_size) // 2
+    eeg = eeg[offset : offset + sample_size]
+    if sampling_type == "post":
+        sample_size = 10_000 // sampling_rate
+        eeg = eeg[::sampling_rate]
+
+    # data = np.zeros((sample_size, 4), dtype=np.float32)
+    signals = []
+    for i in range(4):
+        cols = FEATS[i]
+        for kk in range(4):
+            # TODO: should we use the mean ?
+            # fill nan with mean
+
+            x = eeg[cols[kk]].to_numpy() - eeg[cols[kk + 1]].to_numpy()
+            m = float(np.nanmean(x))
+            if np.isnan(x).mean() < 1:
+                x = np.nan_to_num(x, nan=m)
+            else:
+                x[:] = 0
+
+            signals.append(x)
+            # data[:, col_idx] = x
+    data = np.stack(signals, axis=1)
+    return data
+
+
 def retrieve_eegs_from_parquet(
-    eeg_ids: Iterable[str], feature_cols: list[str], dir_path: pathlib.Path = constants.DATA_DIR / "train_eegs"
+    eeg_ids: Iterable[str],
+    feature_cols: list[str],
+    dir_path: pathlib.Path = constants.DATA_DIR / "train_eegs",
+    sampling_rate: int = 1,
+    sampling_type: str = "normal",
 ) -> dict[str, npt.NDArray[np.float32]]:
     retrieved_eegs = {}
     for eeg_id in eeg_ids:
         fp = dir_path / f"{eeg_id}.parquet"
-        eeg = load_eeg_from_parquet(fp, feature_columns=feature_cols)
+        eeg = load_eeg_from_parquet2(
+            fp=fp,
+            feature_columns=feature_cols,
+            sampling_type=sampling_type,
+            sampling_rate=sampling_rate,
+        )
         retrieved_eegs[eeg_id] = eeg
     return retrieved_eegs
 

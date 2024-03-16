@@ -1,19 +1,18 @@
+import argparse
 import dataclasses
+import importlib
 import pathlib
 import pprint
 
 import numpy as np
 import pandas as pd
 import torch
+from torch.utils import data as torch_data
 
-# import torch.nn as nn
-# import torch.nn.functional as F
 from src import constants, metrics
 
-# from src.exp.exp001 import config as my_config
-# from src.exp.exp002 import config as my_config
-# from src.exp.exp003 import config as my_config
-from src.exp.exp004 import config as my_config
+# from src.exp.exp004 import config as my_config
+from src.exp.exp007 import train as my_train
 from src.inference import tools as my_tools
 from src.models import common as my_models_common
 from src.training import data as my_data
@@ -23,15 +22,34 @@ from src.utils import logger as my_utils_logger
 logger = my_utils_logger.get_root_logger()
 
 
+def init_config(exp_ver: str):
+    cfg = importlib.import_module(f"src.exp.exp{exp_ver}.config").ConfigImpl()
+    return cfg
+
+
+def _load_dl(exp_ver: str, fold: int, dataloader_params: dict) -> torch_data.DataLoader:
+    dl = importlib.import_module(f"src.exp.exp{exp_ver}.train")._init_valid_dataloader(fold, **dataloader_params)
+    return dl
+
+
 def main() -> None:
-    cfg = my_config.ConfigImpl()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--exp_ver", type=str, default="001")
+    args = parser.parse_args()
+    exp_ver = args.exp_ver
+    # exp_ver = "007"
+    # exp_ver = "009"
+    # exp_ver = "exp010"
+    # cfg = my_config.ConfigImpl()
+    cfg = init_config(exp_ver)
     # cfg.model_config.model_params.pretrained = False
-    cfg.valid_config.dataloader_params["is_debug"] = True
+    # cfg.valid_config.dataloader_params["is_debug"] = True
 
     logger.info(f"{pprint.pformat(dataclasses.asdict(cfg))}")
     my_utils_common.seed_everything(cfg.seed)
     device = torch.device("cuda")
 
+    print(f"++++++++++++++++++ {exp_ver} +++++++++++++++++++")
     model_weights = [
         # -- Exp001: mean oof score = 0.4823949817313776
         # pathlib.Path("output/exp001/best_exp001_fold0.pth"),
@@ -52,16 +70,21 @@ def main() -> None:
         # pathlib.Path("output/exp003/best_exp003_fold3.pth"),
         # pathlib.Path("output/exp003/best_exp003_fold4.pth"),
         # -- Exp004: mean oof score = 0.3813732284941517
-        pathlib.Path("output/exp004/best_exp004_fold0.pth"),
-        pathlib.Path("output/exp004/best_exp004_fold1.pth"),
-        pathlib.Path("output/exp004/best_exp004_fold2.pth"),
-        pathlib.Path("output/exp004/best_exp004_fold3.pth"),
-        pathlib.Path("output/exp004/best_exp004_fold4.pth"),
+        # pathlib.Path("output/exp004/best_exp004_fold0.pth"),
+        # pathlib.Path("output/exp004/best_exp004_fold1.pth"),
+        # pathlib.Path("output/exp004/best_exp004_fold2.pth"),
+        # pathlib.Path("output/exp004/best_exp004_fold3.pth"),
+        # pathlib.Path("output/exp004/best_exp004_fold4.pth"),
+        # =================================================
+        *[pathlib.Path(f"output/exp{exp_ver}/best_exp{exp_ver}_fold{i}.pth") for i in range(3)],
+        # *[pathlib.Path(f"output/{exp_ver}/best_{exp_ver}_fold{i}.pth") for i in range(5)],
     ]
 
     scores = []
     for fold in range(5):
-        dl = my_data.init_valid_dataloader(fold, **cfg.valid_config.dataloader_params)
+        # dl = my_data.init_valid_dataloader(fold, **cfg.valid_config.dataloader_params)
+        # dl = my_train._init_valid_dataloader(fold, **cfg.valid_config.dataloader_params)
+        dl = _load_dl(exp_ver, fold, cfg.valid_config.dataloader_params)
         models = []
         for model_weight in model_weights:
             if f"{fold}" in model_weight.stem[-1]:

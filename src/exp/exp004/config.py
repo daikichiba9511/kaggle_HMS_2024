@@ -45,7 +45,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
                 warmup_prefix=False,
                 warmup_t=1,
                 warmup_lr_init=1e-6,
-                cycle_limit=10,
+                cycle_limit=1,
             ),
         )
     )

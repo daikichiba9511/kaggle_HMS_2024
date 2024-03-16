@@ -78,80 +78,6 @@ class TrainHMSDataset(torch_data.Dataset):
         }
 
 
-def _preprocess_raw_signal_for_eeg_dataset(data: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-    # exp007,008
-    # data = np.clip(data, -1024, 1024)
-    # data = np.nan_to_num(data, nan=0.0) / 32.0
-
-    # exp009
-    data = np.clip(data, np.exp(-4), np.exp(8))
-    data = np.log(data)
-    data = np.nan_to_num(data, nan=0.0)
-
-    # to remove the noise and high frequency signals
-    data = my_preprocessings.preprocess_raw_signal(data, classes=1)
-    return data
-
-
-class TrainEEGOutput(TypedDict):
-    x: torch.Tensor
-    """shape: (10_000, 20), cols: see constants.feature_cols
-    """
-    y: torch.Tensor
-    """shape: (6,),
-        smoothed value in [0, 1].
-        order: see constants.TARGETS
-    """
-    y_raw: torch.Tensor
-    eeg_id: str
-    spec_id: str
-
-
-class TrainEEGDataset(torch_data.Dataset):
-    """
-    Ref:
-    1. https://www.kaggle.com/code/nischaydnk/lightning-1d-eegnet-training-pipeline-hbs?scriptVersionId=160814948
-    """
-
-    def __init__(
-        self: Self,
-        df: pd.DataFrame,
-        eegs: dict[str, npt.NDArray[np.float32]],
-        transform: A.Compose | None = None,
-    ) -> None:
-        self.df = df
-        self.eegs = eegs
-        self.transform = transform
-
-    def __len__(self: Self) -> int:
-        return len(self.df)
-
-    def __getitem__(self: Self, idx: int) -> TrainEEGOutput:
-        row = self.df.iloc[idx]
-        data = self.eegs[row["eeg_id"]]
-        data = _preprocess_raw_signal_for_eeg_dataset(data)
-        x = torch.tensor(data, dtype=torch.float32)
-        x = x.permute(1, 0)
-
-        if self.transform is not None:
-            x = self.transform(image=x)["image"]
-
-        y = row[constants.TARGETS].to_numpy().astype(np.float32)
-        y += 1 / 6
-        y /= y.sum()
-
-        y = torch.tensor(y, dtype=torch.float32)
-        y_raw = torch.tensor(row[constants.TARGETS].to_numpy().astype(np.float32), dtype=torch.float32)
-
-        return {
-            "x": x,
-            "y": y,
-            "y_raw": y_raw,
-            "eeg_id": row["eeg_id"],
-            "spec_id": row["spec_id"],
-        }
-
-
 class ValidHMSDataset(torch_data.Dataset):
     def __init__(
         self,
@@ -217,6 +143,88 @@ class ValidHMSDataset(torch_data.Dataset):
         }
 
 
+def _preprocess_raw_signal_for_eeg_dataset(
+    data: npt.NDArray[np.floating], reduce_noise: bool = True, channel_normalize: bool = True
+) -> npt.NDArray[np.floating]:
+    # exp007,008
+    # data = np.clip(data, -1024, 1024)
+    # data = np.nan_to_num(data, nan=0.0) / 32.0
+
+    # exp009
+    data = np.clip(data, np.exp(-4), np.exp(8))
+    data = np.log(data)
+    data = np.nan_to_num(data, nan=0.0)
+
+    # to remove the noise and high frequency signals
+    data = my_preprocessings.preprocess_raw_signal(
+        data, classes=1, reduce_noise=reduce_noise, channel_normalize=channel_normalize
+    )
+    return data
+
+
+class TrainEEGOutput(TypedDict):
+    x: torch.Tensor
+    """shape: (10_000, 20), cols: see constants.feature_cols
+    """
+    y: torch.Tensor
+    """shape: (6,),
+        smoothed value in [0, 1].
+        order: see constants.TARGETS
+    """
+    y_raw: torch.Tensor
+    eeg_id: str
+    spec_id: str
+
+
+class TrainEEGDataset(torch_data.Dataset):
+    """
+    Ref:
+    1. https://www.kaggle.com/code/nischaydnk/lightning-1d-eegnet-training-pipeline-hbs?scriptVersionId=160814948
+    """
+
+    def __init__(
+        self: Self,
+        df: pd.DataFrame,
+        eegs: dict[str, npt.NDArray[np.float32]],
+        transform: A.Compose | None = None,
+        reduce_noise: bool = True,
+        channel_normalize: bool = True,
+    ) -> None:
+        self.df = df
+        self.eegs = eegs
+        self.transform = transform
+        self.reduce_noise = reduce_noise
+        self.channel_normalize = channel_normalize
+
+    def __len__(self: Self) -> int:
+        return len(self.df)
+
+    def __getitem__(self: Self, idx: int) -> TrainEEGOutput:
+        row = self.df.iloc[idx]
+        data = self.eegs[row["eeg_id"]]
+        data = _preprocess_raw_signal_for_eeg_dataset(data, self.reduce_noise, self.channel_normalize)
+        x = torch.tensor(data, dtype=torch.float32)
+        x = x.permute(1, 0)
+
+        if self.transform is not None:
+            x = self.transform(image=x)["image"]
+
+        y = row[constants.TARGETS].to_numpy().astype(np.float32)
+        y += 1 / 6
+        y /= y.sum()
+
+        y = torch.tensor(y, dtype=torch.float32)
+        y_raw = torch.tensor(row[constants.TARGETS].to_numpy().astype(np.float32), dtype=torch.float32)
+
+        return {
+            "x": x,
+            "y": y,
+            "y_raw": y_raw,
+            "eeg_id": row["eeg_id"],
+            "spec_id": row["spec_id"],
+        }
+
+
 class ValidEEGOutput(TypedDict):
     x: torch.Tensor
     """shape: (10_000, 20), cols: see constants.feature_cols
@@ -239,12 +247,14 @@ class ValidEEGDataset(torch_data.Dataset):
         df: pd.DataFrame,
         eegs: dict[str, npt.NDArray[np.float32]],
         transform: A.Compose | None = None,
-        mode: str = "tta",
+        reduce_noise: bool = True,
+        channel_normalize: bool = True,
     ) -> None:
         self.df = df
         self.eegs = eegs
         self.transform = transform
-        self.mode = mode
+        self.reduce_noise = reduce_noise
+        self.channel_normalize = channel_normalize
 
     def __len__(self) -> int:
         return len(self.df)
@@ -252,7 +262,7 @@ class ValidEEGDataset(torch_data.Dataset):
     def __getitem__(self, idx: int) -> ValidEEGOutput:
         row = self.df.iloc[idx]
         data = self.eegs[row["eeg_id"]]
-        data = _preprocess_raw_signal_for_eeg_dataset(data)
+        data = _preprocess_raw_signal_for_eeg_dataset(data, self.reduce_noise, self.channel_normalize)
         x = torch.tensor(data, dtype=torch.float32)
         x = x.permute(1, 0)
 
