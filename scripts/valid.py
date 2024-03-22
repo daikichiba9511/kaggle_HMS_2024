@@ -12,7 +12,6 @@ from torch.utils import data as torch_data
 from src import constants, metrics
 
 # from src.exp.exp004 import config as my_config
-from src.exp.exp007 import train as my_train
 from src.inference import tools as my_tools
 from src.models import common as my_models_common
 from src.training import data as my_data
@@ -28,7 +27,9 @@ def init_config(exp_ver: str):
 
 
 def _load_dl(exp_ver: str, fold: int, dataloader_params: dict) -> torch_data.DataLoader:
-    dl = importlib.import_module(f"src.exp.exp{exp_ver}.train")._init_valid_dataloader(fold, **dataloader_params)
+    # dl = importlib.import_module(f"src.exp.exp{exp_ver}.train")._init_valid_dataloader(fold, **dataloader_params)
+    # dl = importlib.import_module(f"src.exp.exp{exp_ver}.train").init_valid_dataloader(fold, **dataloader_params)
+    dl = my_data.init_valid_dataloader(fold, **dataloader_params)
     return dl
 
 
@@ -42,7 +43,7 @@ def main() -> None:
     # exp_ver = "exp010"
     # cfg = my_config.ConfigImpl()
     cfg = init_config(exp_ver)
-    # cfg.model_config.model_params.pretrained = False
+    cfg.model_config.model_params.pretrained = False
     # cfg.valid_config.dataloader_params["is_debug"] = True
 
     logger.info(f"{pprint.pformat(dataclasses.asdict(cfg))}")
@@ -76,7 +77,8 @@ def main() -> None:
         # pathlib.Path("output/exp004/best_exp004_fold3.pth"),
         # pathlib.Path("output/exp004/best_exp004_fold4.pth"),
         # =================================================
-        *[pathlib.Path(f"output/exp{exp_ver}/best_exp{exp_ver}_fold{i}.pth") for i in range(3)],
+        *[pathlib.Path(f"output/exp{exp_ver}/best_exp{exp_ver}_fold{i}.pth") for i in range(1)],
+        # *[pathlib.Path(f"output/exp{exp_ver}/best_exp{exp_ver}_fold{i}.pth") for i in range(3)],
         # *[pathlib.Path(f"output/{exp_ver}/best_{exp_ver}_fold{i}.pth") for i in range(5)],
     ]
 

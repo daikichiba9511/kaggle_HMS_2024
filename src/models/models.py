@@ -1,7 +1,5 @@
 import dataclasses
 
-from pandas.core.series import base
-from requests.models import encode_multipart_formdata
 import timm
 import torch
 import torch.nn as nn
@@ -9,6 +7,13 @@ from typing_extensions import Self
 
 from src.models import feature_extractor as my_feature_extractor
 from src.models import layers as my_layers
+from src.training import preprocessings as my_preprocess
+
+
+@dataclasses.dataclass
+class HMSModelParams:
+    model_name: str
+    pretrained: bool
 
 
 class HMSModel(nn.Module):
@@ -54,17 +59,53 @@ class HMSModel(nn.Module):
         img = img.permute(0, 3, 1, 2)
         return img
 
-    def forward(self: Self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(
+        self: Self,
+        x: torch.Tensor,
+        do_mixup: bool = False,
+        lam: float | None = None,
+        y: torch.Tensor | None = None,
+        bboxes: list[list[int]] | None = None,
+        k_list: list[int] | None = None,
+        a_list: list[float] | None = None,
+    ) -> dict[str, torch.Tensor]:
         img = self._consolidate_patches_into_a_image(x)
+        # -- CutMixup
+        if lam is not None and do_mixup:
+            if bboxes is not None and y is not None and k_list is not None and a_list is not None:
+                x, y = my_preprocess.torch_cutmix(
+                    img=img,
+                    labels=y,
+                    a_list=a_list,
+                    bboxes=bboxes,
+                    k_list=k_list,
+                )
+                img = lam * x + (1.0 - lam) * x.flip(0)
+                y = lam * y + (1.0 - lam) * y.flip(0)
+            else:
+                img = lam * img + (1.0 - lam) * img.flip(0)
+                y = None
+
         features = self.features(img)
         logits = self.head(features)
 
         out = {"logits": logits}
+        if y is not None:
+            out["y"] = y
         return out
 
 
+@dataclasses.dataclass
+class HMSTransformerModelParams:
+    model_name: str
+    pretrained: bool
+    transformer_model_name: str = "maxvit_small_tf_512"
+
+
 class HMSTransformerModel(nn.Module):
-    def __init__(self: Self, model_name: str, pretrained: bool) -> None:
+    def __init__(
+        self: Self, model_name: str, pretrained: bool, transformer_model_name: str = "maxvit_small_tf_512"
+    ) -> None:
         super().__init__()
         self.pretrained = pretrained
         self.backbone = timm.create_model(
@@ -73,16 +114,20 @@ class HMSTransformerModel(nn.Module):
             features_only=True,
         )
         self.backbone_transformer = timm.create_model(
-            "maxvit_small_tf_512",
+            transformer_model_name,
             pretrained=pretrained,
             features_only=True,
         )
 
         # self.features = nn.Sequential(*list(self.backbone.children())[:-2])
+        backbone_num_features = self.backbone.feature_info.channels()[-1]
+        backbone_transformer_num_features = self.backbone_transformer.feature_info[-1]["num_chs"]
+        self.num_features = backbone_num_features + backbone_transformer_num_features
         self.head = nn.Sequential(
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(1088, 6),
+            nn.Dropout(0.5, inplace=True),
+            nn.Linear(self.num_features, 6),
         )
 
     def _consolidate_patches_into_a_image(self: Self, x: torch.Tensor) -> torch.Tensor:
@@ -94,17 +139,32 @@ class HMSTransformerModel(nn.Module):
         Returns:
             x: transformed tensor, shape (bs, 3, 512, 512)
         """
-        # shape: (bs, 4, 128, 256)
+        # shape: (bs, 128, 256, 4)
         # spectrograms = [x[:, i : i + 1, :, :] for i in range(4)]
         spectrograms = [x[:, :, :, i : i + 1] for i in range(4)]
+        # shape: (bs, 512, 256, 4)
         spectrograms = torch.cat(spectrograms, dim=1)
 
-        # shape: (bs, 4, 128, 256)
+        # shape: (bs, 128, 256, 4)
         eegs = [x[:, :, :, i : i + 1] for i in range(4, 8)]
+        # shape: (bs, 512, 256, 4)
         eegs = torch.cat(eegs, dim=1)
 
-        x = torch.cat([spectrograms, eegs], dim=2)
-        x = torch.cat([x, x, x], dim=3)
+        if x.shape[3] == 12:
+            # shape: (bs, 128, 256, 4)
+            specs_from_signals = [x[:, :, :, i : i + 1] for i in range(8, 12)]
+            # shape: (bs, 512, 256, 4)
+            specs_from_signals = torch.cat(specs_from_signals, dim=1)
+            specs_from_signals = torch.cat([specs_from_signals, specs_from_signals], dim=2)
+
+            x = torch.cat([spectrograms, eegs], dim=2)
+            # exp026
+            x = torch.cat([x, specs_from_signals, x], dim=3)
+            # exp027
+            # x = torch.cat([x, specs_from_signals, specs_from_signals], dim=3)
+        else:
+            x = torch.cat([spectrograms, eegs], dim=2)
+            x = torch.cat([x, x, x], dim=3)
 
         # region x {spectrogram, eeg} のスペクトログラム(128, 256)の貼り合わせ x 3 (channel direction)
         # |-----------|
@@ -118,8 +178,33 @@ class HMSTransformerModel(nn.Module):
         x = x.permute(0, 3, 1, 2)
         return x
 
-    def forward(self: Self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(
+        self: Self,
+        x: torch.Tensor,
+        do_mixup: bool = False,
+        lam: float | None = None,
+        y: torch.Tensor | None = None,
+        bboxes: list[list[int]] | None = None,
+        k_list: list[int] | None = None,
+        a_list: list[float] | None = None,
+    ) -> dict[str, torch.Tensor]:
         img = self._consolidate_patches_into_a_image(x)
+        # -- CutMixup
+        if lam is not None and do_mixup:
+            if bboxes is not None and y is not None and k_list is not None and a_list is not None:
+                x, y = my_preprocess.torch_cutmix(
+                    img=img,
+                    labels=y,
+                    a_list=a_list,
+                    bboxes=bboxes,
+                    k_list=k_list,
+                )
+                img = lam * x + (1.0 - lam) * x.flip(0)
+                y = lam * y + (1.0 - lam) * y.flip(0)
+            else:
+                img = lam * img + (1.0 - lam) * img.flip(0)
+                y = None
+
         x1 = self.backbone_transformer(img)
         # shape: (bs, 768, 16, 16)
         x1 = x1[-1]
@@ -133,6 +218,8 @@ class HMSTransformerModel(nn.Module):
         logits = self.head(x)
 
         out = {"logits": logits}
+        if y is not None:
+            out["y"] = y
         return out
 
 
@@ -312,6 +399,7 @@ class HMSCNNSpecFEParams:
 class HMSCNNSpecFEModel(nn.Module):
     def __init__(self: Self, params: HMSCNNSpecFEParams) -> None:
         super().__init__()
+        self.params = params
         self.num_classes = 6
         self.fe = my_feature_extractor.CNNSpectgram(
             in_channels=params.in_channels,
@@ -327,27 +415,55 @@ class HMSCNNSpecFEModel(nn.Module):
             params.encoder_pretrained,
             features_only=True,
             in_chans=len(params.kernel_size),
+            # in_chans=3,
+            drop_rate=0.5,
         )
         self.pool = my_layers.GeM()
         self.num_features = self.encoder.feature_info.channels()[-1]
         self.head = nn.Sequential(
             # nn.LayerNorm(self.num_features),
-            nn.Dropout(0.5, inplace=True),
             nn.Linear(in_features=self.num_features, out_features=self.num_classes),
+            nn.Dropout(0.5, inplace=True),
         )
 
     def forward(
-        self: Self, x: torch.Tensor, do_mixup: bool = False, lam: float | None = None
+        self: Self,
+        x: torch.Tensor,
+        do_mixup: bool = False,
+        lam: float | None = None,
+        y: torch.Tensor | None = None,
+        bboxes: list[list[int]] | None = None,
+        k_list: list[int] | None = None,
+        a_list: list[float] | None = None,
     ) -> dict[str, torch.Tensor]:
         """
         Args:
-            x: input tensor, shape (bs, in_channels, time_steps)
+            x: input tensor, shape (bs, time_steps, in_channels)
         """
 
         # shape: (bs, len(kernels), base_filters, time_steps//stride)
         spec_img = self.fe(x)
+        # spec_img = [spec_img[:, i, :, :] for i in range(spec_img.shape[1])]
+        # spec_img = torch.cat(spec_img, dim=1).unsqueeze(1)
+        # spec_img = torch.cat([spec_img, spec_img, spec_img], dim=1)
+        # w = spec_img.shape[2]
+        # spec_img = spec_img[:, :, :, :w]
+
+        # -- CutMixup
         if lam is not None and do_mixup:
-            x = lam * spec_img + (1.0 - lam) * spec_img.flip(0)
+            if bboxes is not None and y is not None and k_list is not None and a_list is not None:
+                x, y = my_preprocess.torch_cutmix(
+                    img=spec_img,
+                    labels=y,
+                    a_list=a_list,
+                    bboxes=bboxes,
+                    k_list=k_list,
+                )
+                x = lam * x + (1.0 - lam) * x.flip(0)
+                y = lam * y + (1.0 - lam) * y.flip(0)
+            else:
+                x = lam * spec_img + (1.0 - lam) * spec_img.flip(0)
+                y = None
 
         features = self.encoder(spec_img)
         last_layer_feature = features[-1]
@@ -357,7 +473,10 @@ class HMSCNNSpecFEModel(nn.Module):
 
         logits = self.head(pooled_features)
 
-        return {"logits": logits}
+        out = {"logits": logits}
+        if lam is not None and do_mixup and y is not None:
+            out["y"] = y
+        return out
 
 
 # ====================
@@ -380,7 +499,8 @@ def _test_hms_transformer() -> None:
         model_name="tf_efficientnet_b0.ns_jft_in1k",
         pretrained=False,
     )
-    x = torch.rand(2, 128, 256, 8)
+    # x = torch.rand(2, 128, 256, 8)
+    x = torch.rand(2, 128, 256, 12)
     o = model(x)
 
     print(f"input.shape => {x.shape}")
@@ -418,29 +538,47 @@ def _test_hms_1d_parallel_2way_conv() -> None:
 
 
 def _test_hms_cnn_spec_fe() -> None:
+    import random
+
+    from src.training import preprocessings as my_preprocess
+
     print("-- test_hms_cnn_spec_fe --")
     fe_params = HMSCNNSpecFEParams(
-        in_channels=20,
+        # in_channels=16,
+        # base_filters=128 * 4,
+        # kernel_size=(32, 16, 4, 2),
+        # stride=4,
+        # sigmoid=False,
+        # output_size=None,
+        # reinit=True,
+        # # encoder_name="tf_efficientnet_b0.ns_jft_in1k",
+        # encoder_name="tf_efficientnet_b2.ns_jft_in1k",
+        # encoder_pretrained=True,
+        in_channels=4,
         base_filters=128,
-        kernel_size=(32, 16, 4, 2),
-        stride=4,
-        sigmoid=False,
-        output_size=None,
-        reinit=True,
-        encoder_name="tf_efficientnet_b0.ns_jft_in1k",
+        kernel_size=(128, 64, 32, 16),
+        stride=10000 // 512,  # time_step=10_000//strid
+        # stride=4 * 4,  # time_step=10_000//strid
+        # encoder_name="tf_efficientnet_b0.ns_jft_in1k",
+        encoder_name="tf_efficientnet_b2.ns_jft_in1k",
         encoder_pretrained=True,
     )
     model = HMSCNNSpecFEModel(fe_params)
-    input = torch.rand(2, fe_params.in_channels, 10000)
+    # model = torch.compile(model, mode="default")
+    bs = 4
+    input = torch.rand(bs, 10000, fe_params.in_channels)
     print(f"{input.shape = }")
-    out = model(input)
+    bboxes, k_list, a_list = my_preprocess.prepare_cutmix(
+        x_max=10000 // fe_params.stride, y_max=fe_params.base_filters, bs=bs
+    )
+    out = model(input, do_mixup=True, lam=0.5, y=torch.rand(bs, 6), bboxes=bboxes, k_list=k_list, a_list=a_list)
     print(f"{out['logits'].shape = }")
 
 
 def _test() -> None:
     # _test_hms()
-    # _test_hms_transformer()
-    _test_hms_cnn_spec_fe()
+    _test_hms_transformer()
+    # _test_hms_cnn_spec_fe()
 
 
 if __name__ == "__main__":

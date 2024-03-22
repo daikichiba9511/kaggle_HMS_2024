@@ -1,4 +1,5 @@
 import pathlib
+import random
 from collections.abc import Iterable, Sequence
 from logging import getLogger
 
@@ -8,6 +9,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import polars as pl
+import torch
 from scipy import signal
 
 # import cv2
@@ -76,6 +78,64 @@ def rand_bbox(width: int, height: int, lam: float) -> tuple[int, int, int, int]:
     return bbx1, bby1, bbx2, bby2
 
 
+def prepare_cutmix(x_max: int, y_max: int, bs: int) -> tuple[list[list[int]], list[int], list[float]]:
+    bboxes = []
+    k_list = []
+    a_list = []
+    for _ in range(bs):
+        x, y = random.randint(0, x_max), random.randint(0, y_max)
+        # width = int(min(x_max, y_max) * random.random())
+        cut_width = int(x_max * random.random())
+        cut_height = int(y_max * random.random())
+        bboxes.append([
+            max(0, int(x - cut_width // 2)),
+            max(0, int(y - cut_height // 2)),
+            min(x_max, int(x + cut_width // 2)),
+            min(y_max, int(y + cut_height // 2)),
+        ])
+        k_list.append(random.randint(0, bs - 1))
+        a_list.append(float((cut_width / x_max) * (cut_height / y_max)))
+    return bboxes, k_list, a_list
+
+
+def torch_cutmix(
+    img: torch.Tensor, labels: torch.Tensor, a_list: list[float], bboxes: list[list[int]], k_list: list[int]
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Args:
+        img: Input image.
+            shape (bs, len(kernels), base_filters, round(time_steps/stride))
+    """
+    # print(f"{img.shape = }")
+    max_x, max_y = img.size(3), img.size(2)
+    # make cutmix Image
+    imgs = []
+    lbls = []
+    for j in range(img.size(0)):
+        # make cutmix image
+        k = k_list[j]
+        a = a_list[j]
+        x1, y1, x2, y2 = bboxes[j]
+        one = img[j, :, y1:y2, 0:x1]
+        two = img[k, :, y1:y2, x1:x2]
+        three = img[j, :, y1:y2, x2:max_x]
+        # print(f"{one.shape = }, {two.shape = }, {three.shape = }")
+        # shape: (len(kernels), random_length, round(time_steps/stride))
+        middle = torch.cat((one, two, three), dim=2)
+        # print(f"{img[j, :, 0:y1, :].shape=}, {middle.shape = }, {img[j, :, y2:max_y, :].shape = }")
+        imgs.append(torch.cat((img[j, :, 0:y1, :], middle, img[j, :, y2:max_y, :]), dim=1).unsqueeze(0))
+        # make cutmix label
+        lbl1 = labels[j]
+        lbl2 = labels[j]
+        lbl = a * lbl1 + (1 - a) * lbl2
+        # print(f"{lbl.shape}")
+        lbls.append(lbl.reshape(1, -1))
+    imgs = torch.concat(imgs, dim=0)
+    lbls = torch.concat(lbls, dim=0)
+    # print(f"{imgs.shape = }, {lbls.shape = }")
+    return imgs, lbls
+
+
 def get_transforms(is_train: bool) -> A.Compose:
     if is_train:
         params1 = {
@@ -99,8 +159,9 @@ def get_transforms(is_train: bool) -> A.Compose:
             A.XYMasking(**params1, p=0.5),
             A.XYMasking(**params2, p=0.5),
             A.XYMasking(**params3, p=0.5),
-            A.HorizontalFlip(p=0.5),
-            # A.VerticalFlip(p=0.5),
+            A.XYMasking(**params3, p=0.5),  # exp028
+            # A.HorizontalFlip(p=0.5), # exp001 ~ exp004
+            A.VerticalFlip(p=0.5),
             A.OneOf([
                 A.XYMasking(mask_x_length=5, mask_y_length=16, num_masks_x=1, num_masks_y=1, fill_value=0, p=0.5),
                 A.CoarseDropout(max_holes=4),
@@ -168,7 +229,7 @@ def preprocess_raw_signal(
     return data
 
 
-def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) -> np.ndarray:
+def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Create a spectrogram from the eeg series
 
     Args:
@@ -185,7 +246,7 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
         | <----------> | <===========> |
         0    offset
     """
-    # Load middle 50 seconds of eeg series
+    # Load middle 50 seconds of eeg serie
     eeg = pd.read_parquet(parquet_fp)
     if offset is None:
         offset = (len(eeg) - 10_000) // 2
@@ -196,6 +257,7 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
     signals = []
     for k in range(4):
         cols = FEATS[k]
+        signal = []
         for kk in range(4):
             # Compute pair differences
             x = eeg[cols[kk]].to_numpy() - eeg[cols[kk + 1]].to_numpy()
@@ -208,9 +270,13 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
             else:
                 x[:] = 0
 
-            signals.append(x)
+            signal.append(x.reshape(1, -1))
 
             # Raw spectrogram
+            # hop_length = len(x) // width
+            # n_fft: 横の解像度
+            # n_mels: height = n_mesl
+            # shape: (n_mels, width) = (128, 256)
             mel_spec = librosa.feature.melspectrogram(
                 y=x,
                 sr=200,
@@ -223,9 +289,10 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
             )
 
             # Log transform
+            # shape: (128, 256)
             width = (mel_spec.shape[1] // 32) * 32
             mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
-            mel_spec_db = mel_spec_db[:, :width].astype(np.float32)
+            mel_spec_db = mel_spec_db.astype(np.float32)[:, :width]
 
             # Standarize -1 to 1
             mel_spec_db = (mel_spec_db + 40) / 40
@@ -233,7 +300,13 @@ def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) ->
 
         # average the 4 montage differences
         img[:, :, k] /= 4
-    return img
+        # shape: (4, 10000)
+        signal = np.concatenate(signal, axis=0)
+        signals.append(signal.reshape(1, 4, -1))
+
+    # shape: (4, 4, 10000)
+    signals = np.concatenate(signals, axis=0)
+    return img, signals
 
 
 def load_eeg_from_parquet(
@@ -245,19 +318,26 @@ def load_eeg_from_parquet(
     #
     # extract middle 50 seconds = 10_000 samples
     # extract middle 10 seconds = 2000 samples
+    # sequence_length = 10_000
+    sequence_length = 2000
+    print(f"{sequence_length = }")
     if sampling_type == "normal":
-        sample_size = 10_000 // sampling_rate
+        sample_size = sequence_length // sampling_rate
     else:
-        sample_size = 10_000
+        sample_size = sequence_length
     eeg = pl.read_parquet(fp, columns=feature_columns)
     n_rows = len(eeg)
+    # mid = n_rows // 2
+    # offset = mid - (sample_size // 2)
+    #        = (n_rows // 2) - (sample_size // 2)
+    #        = (n_rows - sample_size) // 2
     offset = (n_rows - sample_size) // 2
     eeg = eeg[offset : offset + sample_size]
     if sampling_type == "post":
-        sample_size = 10_000 // sampling_rate
+        sample_size = sequence_length // sampling_rate
         eeg = eeg[::sampling_rate]
 
-    data = np.zeros((10_000, eeg.shape[1]), dtype=np.float32)
+    data = np.zeros((sequence_length, eeg.shape[1]), dtype=np.float32)
     for col_idx, col in enumerate(feature_columns):
         # TODO: should we use the mean ?
         # fill nan with mean
@@ -281,13 +361,22 @@ def load_eeg_from_parquet2(
     #
     # extract middle 50 seconds = 10_000 samples
     # extract middle 10 seconds = 2000 samples
+
+    sequence_length = 10000
+    # print(f"{sequence_length = }")
     if sampling_type == "normal":
-        sample_size = 10_000 // sampling_rate
+        sample_size = sequence_length // sampling_rate
     else:
-        sample_size = 10_000
-    eeg = pl.read_parquet(fp, columns=feature_columns)
+        sample_size = sequence_length
+    # eeg = pl.read_parquet(fp, columns=feature_columns)
+    eeg = pl.read_parquet(fp)
     n_rows = len(eeg)
+    # mid = n_rows // 2
+    # offset = mid - (sample_size // 2)
+    #        = (n_rows // 2) - (sample_size // 2)
+    #        = (n_rows - sample_size) // 2
     offset = (n_rows - sample_size) // 2
+
     eeg = eeg[offset : offset + sample_size]
     if sampling_type == "post":
         sample_size = 10_000 // sampling_rate
@@ -297,10 +386,10 @@ def load_eeg_from_parquet2(
     signals = []
     for i in range(4):
         cols = FEATS[i]
+        signal = []
         for kk in range(4):
             # TODO: should we use the mean ?
             # fill nan with mean
-
             x = eeg[cols[kk]].to_numpy() - eeg[cols[kk + 1]].to_numpy()
             m = float(np.nanmean(x))
             if np.isnan(x).mean() < 1:
@@ -308,9 +397,11 @@ def load_eeg_from_parquet2(
             else:
                 x[:] = 0
 
-            signals.append(x)
+            signal.append(x.reshape(1, -1))
             # data[:, col_idx] = x
-    data = np.stack(signals, axis=1)
+        signal = np.concatenate(signal, axis=0)
+        signals.append(signal.reshape(1, 4, -1))
+    data = np.concatenate(signals, axis=0)
     return data
 
 
@@ -330,6 +421,7 @@ def retrieve_eegs_from_parquet(
             sampling_type=sampling_type,
             sampling_rate=sampling_rate,
         )
+        eeg = eeg.mean(axis=1).reshape(4, -1).astype(np.float32)
         retrieved_eegs[eeg_id] = eeg
     return retrieved_eegs
 
@@ -374,7 +466,7 @@ def make_spectrograms_from_eeg(
     eeg_ids: Sequence[str],
     dir_path: pathlib.Path = constants.DATA_DIR / "train_eegs",
     with_progress_bar: bool = False,
-) -> dict[str, np.ndarray]:
+) -> tuple[dict[str, npt.NDArray[np.float32]], dict[str, npt.NDArray[np.float32]]]:
     """Create spectrograms from the eeg files
 
     Args:
@@ -382,7 +474,8 @@ def make_spectrograms_from_eeg(
         dir_path: path to the directory where the eeg files are stored
 
     Returns:
-        dict: eeg_id -> spectrogram
+        spectrograms_from_eeg: eeg_id -> spectrogram
+        signals_from_eeg: eeg_id -> signals
 
     """
 
@@ -390,11 +483,13 @@ def make_spectrograms_from_eeg(
         eeg_ids = tqdm(eeg_ids, total=len(eeg_ids), desc="Create Spectrogram from EEG")  # type: ignore
 
     spectrograms_from_eeg = {}
+    signals_from_eeg = {}
     for eeg_id in eeg_ids:
         fp = dir_path / f"{eeg_id}.parquet"
-        spectrogram = spectrogram_from_egg(fp, offset=None)
-        spectrograms_from_eeg[f"{eeg_id}"] = spectrogram
-    return spectrograms_from_eeg
+        spectrogram, signals = spectrogram_from_egg(fp, offset=None)
+        spectrograms_from_eeg[f"{eeg_id}"] = spectrogram.astype(np.float32)
+        signals_from_eeg[f"{eeg_id}"] = signals.astype(np.float32)
+    return spectrograms_from_eeg, signals_from_eeg
 
 
 _SPECS_CACHE: dict[str, np.ndarray] | None = None
@@ -455,9 +550,32 @@ def _test_load_eeg() -> None:
     print(f"{eeg.shape = }")
 
 
+def _test_load_eeg2() -> None:
+    print(" -- test_load_eeg2")
+    fp = next(iter(constants.DATA_DIR.joinpath("train_eegs").glob("*.parquet")))
+    print(fp)
+    eeg = load_eeg_from_parquet2(fp, constants.feature_cols)
+    print(f"{eeg.shape = }")
+    eeg = eeg.mean(axis=1).reshape(4, -1).astype(np.float32)
+    print(f"{eeg.shape = }")
+
+
+def _test_make_spectrograms() -> None:
+    print(" -- test_make_spectrograms")
+    fp = next(iter(constants.DATA_DIR.joinpath("train_eegs").glob("*.parquet")))
+    print(fp)
+    specs, signals = make_spectrograms_from_eeg([fp.stem])
+    keys = next(iter(specs.keys()))
+    print(f"{keys = }")
+    print(f"{specs[keys].shape = }")
+    print(f"{signals[keys].shape = }")
+
+
 def _test() -> None:
     # _test_load_spec()
-    _test_load_eeg()
+    # _test_load_eeg()
+    _test_load_eeg2()
+    # _test_make_spectrograms()
 
 
 if __name__ == "__main__":

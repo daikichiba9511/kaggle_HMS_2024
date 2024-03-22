@@ -12,19 +12,17 @@ from src.training import tools as my_tools
 
 @dataclasses.dataclass
 class ModelConfigImpl(my_models_common.ModelConfig):
-    model_name: my_models_common.ModelType = "HMS1DParallel2WayConv"
+    model_name: my_models_common.ModelType = "HMSCNNSpecFEModel"
     model_params: my_models_common.ModelParams = dataclasses.field(
-        default_factory=lambda: my_models_common.HMS1DParallel2WayConvParams(
-            # kernels=[3, 5, 7, 9],
-            short_kernels=[3, 5, 7, 9, 15],
-            long_kernels=[21, 32, 64, 128, 256],
-            # in_channels=20,
+        default_factory=lambda: my_models_common.HMSCNNSpecFEParams(
             in_channels=4,
-            fixed_kernel_size=25,
-            gru_params=my_models_common.GRUParams(
-                hidden_size=64,
-                num_layers=4,
-            ),
+            base_filters=128,
+            kernel_size=(128, 64, 32, 16),
+            stride=4,  # time_step=10_000//strid
+            # stride=4 * 4,  # time_step=10_000//strid
+            # encoder_name="tf_efficientnet_b0.ns_jft_in1k",
+            encoder_name="tf_efficientnet_b2.ns_jft_in1k",
+            encoder_pretrained=True,
         ),
     )
 
@@ -51,7 +49,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
                 t_initial=15,
                 lr_min=1e-6,
                 warmup_prefix=False,
-                warmup_t=1,
+                warmup_t=0,
                 warmup_lr_init=1e-6,
                 cycle_limit=1,
             ),
@@ -75,9 +73,10 @@ class TrainConfigImpl(my_tools.TrainConfig):
 
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 8,
+            batch_size=8 * 2,
             num_workers=4,
             is_debug=False,
+            # reduce_noise=False,
             reduce_noise=True,
             channel_normalize=False,
         )
@@ -88,9 +87,10 @@ class TrainConfigImpl(my_tools.TrainConfig):
 class ValidConfigImpl(my_tools.ValidConfig):
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 8,
+            batch_size=8 * 2,
             num_workers=4,
             is_debug=False,
+            # reduce_noise=False,
             reduce_noise=True,
             channel_normalize=False,
         )
@@ -99,11 +99,11 @@ class ValidConfigImpl(my_tools.ValidConfig):
 
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
-    """use HMS1DParallel2WayConv model w/o channel_normalize
-    base: 013
+    """use HMS-CNN with SpecFE model use load_eeg_from_parquet2
+    base: 018
     """
 
-    name: str = "exp014"
+    name: str = "exp019"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name
 

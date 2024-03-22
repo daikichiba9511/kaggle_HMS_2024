@@ -12,20 +12,16 @@ from src.training import tools as my_tools
 
 @dataclasses.dataclass
 class ModelConfigImpl(my_models_common.ModelConfig):
-    model_name: my_models_common.ModelType = "HMS1DParallel2WayConv"
+    model_name: my_models_common.ModelType = "HMSTransformer"
     model_params: my_models_common.ModelParams = dataclasses.field(
-        default_factory=lambda: my_models_common.HMS1DParallel2WayConvParams(
-            # kernels=[3, 5, 7, 9],
-            short_kernels=[3, 5, 7, 9, 15],
-            long_kernels=[21, 32, 64, 128, 256],
-            # in_channels=20,
-            in_channels=4,
-            fixed_kernel_size=25,
-            gru_params=my_models_common.GRUParams(
-                hidden_size=64,
-                num_layers=4,
-            ),
-        ),
+        default_factory=lambda: my_models_common.HMSTransformerModelParams(
+            pretrained=True,
+            # model_name="tf_efficientnet_b0.ns_jft_in1k",
+            # model_name="tf_efficientnet_b2.ns_jft_in1k",
+            # model_name="eca_nfnet_l0",
+            model_name="eca_nfnet_l0",
+            transformer_model_name="maxvit_tiny_tf_512",
+        )
     )
 
 
@@ -37,7 +33,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
         default_factory=lambda: cast(
             my_optim.AdamWParams,
             dict(
-                lr=1e-3,
+                lr=1e-4,
                 weight_decay=1e-2,
                 eps=1e-6,
             ),
@@ -46,14 +42,14 @@ class TrainConfigImpl(my_tools.TrainConfig):
     scheduler_name: my_optim.SchdulerType = "CosineLRScheduler"
     scheduler_params: my_optim.SchduleParams = dataclasses.field(
         default_factory=lambda: cast(
-            my_optim.CosineLRSchedulerParams,
+            my_optim.SchduleParams,
             dict(
-                t_initial=15,
+                t_initial=10,
                 lr_min=1e-6,
                 warmup_prefix=False,
                 warmup_t=1,
                 warmup_lr_init=1e-6,
-                cycle_limit=1,
+                cycle_limit=10,
             ),
         )
     )
@@ -75,11 +71,10 @@ class TrainConfigImpl(my_tools.TrainConfig):
 
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 8,
+            batch_size=8 * 1,  # VRAM 15GB
+            # batch_size=8 * 2,
             num_workers=4,
             is_debug=False,
-            reduce_noise=True,
-            channel_normalize=False,
         )
     )
 
@@ -88,22 +83,19 @@ class TrainConfigImpl(my_tools.TrainConfig):
 class ValidConfigImpl(my_tools.ValidConfig):
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 8,
+            batch_size=8 * 1,  # VRAM 15GB
+            # batch_size=8 * 2,
             num_workers=4,
             is_debug=False,
-            reduce_noise=True,
-            channel_normalize=False,
         )
     )
 
 
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
-    """use HMS1DParallel2WayConv model w/o channel_normalize
-    base: 013
-    """
-
-    name: str = "exp014"
+    base: str = "exp023"
+    diff: str = "use dm_nfnet_l0 as backbone"
+    name: str = "exp024"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name
 

@@ -27,6 +27,20 @@ from src.utils import common as my_common_utils
 logger = logging.getLogger(__name__)
 
 
+def freeze(model: nn.Module, keys: Sequence[str]) -> None:
+    for name, param in model.named_parameters():
+        for key in keys:
+            if name in key:
+                param.requires_grad = False
+
+
+def unfreeze(model: nn.Module, keys: Sequence[str]) -> None:
+    for name, param in model.named_parameters():
+        for key in keys:
+            if name in key:
+                param.requires_grad = True
+
+
 class ClipParams(TypedDict):
     type: Literal["value", "norm"]
     value: float

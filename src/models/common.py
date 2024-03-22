@@ -1,35 +1,31 @@
 import dataclasses
 import pathlib
 from logging import getLogger
-from typing import Literal, Protocol, TypeAlias, TypeVar, cast
+from typing import Literal, Protocol, TypeAlias, TypeVar, cast, overload
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from src.models import models as my_models
-from src.models.models import GRUParams, HMS1DParallel2WayConvParams, HMS1DParallelConvParams, HMSCNNSpecFEParams
+from src.models.models import (
+    GRUParams,
+    HMS1DParallel2WayConvParams,
+    HMS1DParallelConvParams,
+    HMSCNNSpecFEParams,
+    HMSModel,
+    HMSTransformerModel,
+    HMSTransformerModelParams,
+)
 
 logger = getLogger(__name__)
 
 ModelType = Literal["HMSModel", "HMSTransformer", "HMS1DParallelConv", "HMS1DParallel2WayConv", "HMSCNNSpecFEModel"]
 
 
-@dataclasses.dataclass
-class HMSModelParams:
-    model_name: str
-    pretrained: bool
-
-
-@dataclasses.dataclass
-class HMSTransformerModelParams:
-    model_name: str
-    pretrained: bool
-
-
 ModelParams: TypeAlias = (
-    HMSModelParams
-    | HMSTransformerModelParams
+    my_models.HMSModelParams
+    | my_models.HMSTransformerModelParams
     | my_models.HMS1DParallelConvParams
     | my_models.HMS1DParallel2WayConvParams
     | my_models.HMSCNNSpecFEParams
@@ -42,10 +38,10 @@ class ModelConfig(Protocol):
 
 
 def init_model(model_name: ModelType, model_params: ModelParams) -> nn.Module:
-    if model_name == "HMSModel" and isinstance(model_params, HMSModelParams):
+    if model_name == "HMSModel" and isinstance(model_params, my_models.HMSModelParams):
         model = my_models.HMSModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
         return model
-    elif model_name == "HMSTransformer" and isinstance(model_params, HMSTransformerModelParams):
+    elif model_name == "HMSTransformer" and isinstance(model_params, my_models.HMSTransformerModelParams):
         model = my_models.HMSTransformerModel(model_name=model_params.model_name, pretrained=model_params.pretrained)
         return model
     elif model_name == "HMS1DParallelConv" and isinstance(model_params, HMS1DParallelConvParams):

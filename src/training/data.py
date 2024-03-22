@@ -18,22 +18,53 @@ from src.utils import common as my_utils_common
 logger = getLogger(__name__)
 
 
+def _consolidate_patches_into_a_image(x: torch.Tensor) -> torch.Tensor:
+    """make a spectrogram from the eeg and the spectrogram
+
+    Args:
+        x (torch.Tensor): input tensor, shape (bs, 128, 256, 8)
+    """
+    # shape: (bs, 4, 128, 256)
+    # spectrograms = [x[:, i : i + 1, :, :] for i in range(4)]
+    spectrograms = [x[:, :, :, i : i + 1] for i in range(4)]
+    spectrograms = torch.cat(spectrograms, dim=1)
+
+    # shape: (bs, 4, 128, 256)
+    eegs = [x[:, :, :, i : i + 1] for i in range(4, 8)]
+    eegs = torch.cat(eegs, dim=1)
+
+    x = torch.cat([spectrograms, eegs], dim=2)
+    img = torch.cat([x, x, x], dim=3)
+
+    # region x {spectrogram, eeg} のスペクトログラムの貼り合わせ x 3 (channel direction)
+    # |-------------------|
+    # |    |    |    |    |
+    # |-------------------|
+    # |    |    |    |    |
+    # |-------------------|
+    #
+    # permute to (bs, 3, 512, 512) to order channel first
+    # shape: (bs, 512, 512, 3) -> (bs, 3, 512, 512)
+    img = img.permute(0, 3, 1, 2)
+    return img
+
+
 class TrainHMSDataset(torch_data.Dataset):
     def __init__(
         self,
         df: pd.DataFrame,
-        spectrograms: dict[str, np.ndarray],
-        eeg_specs: dict[str, np.ndarray],
+        spectrograms: dict[str, npt.NDArray[np.float32]],
+        eeg_specs: dict[str, npt.NDArray[np.float32]],
         transform: A.Compose | None = None,
-        mode: str = "tta",
+        signals: dict[str, npt.NDArray[np.float32]] | None = None,
     ) -> None:
         self.df = df
         self.spectrograms = spectrograms
         self.eeg_spectrograms = eeg_specs
         self.transform = transform
-        self.mode = mode
+        self.signals = signals
 
-    def __len__(self) -> int:
+    def __len__(self: Self) -> int:
         return len(self.df)
 
     def __getitem__(self, idx: int) -> dict:
@@ -57,6 +88,7 @@ class TrainHMSDataset(torch_data.Dataset):
             img = (img - mu) / (std + ep)
             img = np.nan_to_num(img, nan=0.0)
             x[14:-14, :, region] = img[:, 22:-22] / 2.0
+
             img = self.eeg_spectrograms[row["eeg_id"]]
             x[:, :, 4:] = img
 
@@ -70,11 +102,20 @@ class TrainHMSDataset(torch_data.Dataset):
         x = torch.tensor(x, dtype=torch.float32)
         y = torch.tensor(y, dtype=torch.float32)
 
+        if self.signals is not None:
+            # shape: (4, 4, 10000)
+            signals = self.signals[row["eeg_id"]]
+            signals = signals.mean(axis=1).reshape(4, -1)
+            signals = torch.tensor(signals, dtype=torch.float32)
+        else:
+            signals = torch.tensor(0)
+
         return {
             "x": x,
             "y": y,
             "eeg_id": row["eeg_id"],
             "spec_id": row["spec_id"],
+            "signals": signals,
         }
 
 
@@ -85,13 +126,13 @@ class ValidHMSDataset(torch_data.Dataset):
         spectrograms: dict[str, np.ndarray],
         eeg_specs: dict[str, np.ndarray],
         transform: A.Compose | None = None,
-        mode: str = "tta",
+        signals: dict[str, npt.NDArray[np.float32]] | None = None,
     ) -> None:
         self.df = df
         self.spectrograms = spectrograms
         self.eeg_spectrograms = eeg_specs
         self.transform = transform
-        self.mode = mode
+        self.signals = signals
 
     def __len__(self) -> int:
         return len(self.df)
@@ -131,6 +172,12 @@ class ValidHMSDataset(torch_data.Dataset):
         x = torch.tensor(x, dtype=torch.float32)
         y = torch.tensor(y, dtype=torch.float32)
         y_raw = torch.tensor(row[constants.TARGETS].to_numpy().astype(np.float32), dtype=torch.float32)
+        if self.signals is not None:
+            signals = self.signals[row["eeg_id"]]
+            signals = signals.mean(axis=1).reshape(4, -1)
+            signals = torch.tensor(signals, dtype=torch.float32)
+        else:
+            signals = torch.tensor(0)
 
         return {
             "x": x,
@@ -140,6 +187,7 @@ class ValidHMSDataset(torch_data.Dataset):
             "spec_id": row["spec_id"],
             # "spec_offset": row["spectrogram_label_offset_seconds"],
             "spec_offset": r * 2,
+            "signals": signals,
         }
 
 
@@ -204,7 +252,7 @@ class TrainEEGDataset(torch_data.Dataset):
         data = self.eegs[row["eeg_id"]]
         data = _preprocess_raw_signal_for_eeg_dataset(data, self.reduce_noise, self.channel_normalize)
         x = torch.tensor(data, dtype=torch.float32)
-        x = x.permute(1, 0)
+        # x = x.permute(1, 0)
 
         if self.transform is not None:
             x = self.transform(image=x)["image"]
@@ -264,7 +312,7 @@ class ValidEEGDataset(torch_data.Dataset):
         data = self.eegs[row["eeg_id"]]
         data = _preprocess_raw_signal_for_eeg_dataset(data, self.reduce_noise, self.channel_normalize)
         x = torch.tensor(data, dtype=torch.float32)
-        x = x.permute(1, 0)
+        # x = x.permute(1, 0)
 
         y = row[constants.TARGETS].to_numpy().astype(np.float32)
         y += 1 / 6
@@ -330,13 +378,15 @@ def load_valid_df(fold: int) -> pl.DataFrame:
     return valid_df
 
 
-def _make_specs(df: pl.DataFrame) -> dict[str, np.ndarray]:
+def _make_specs(df: pl.DataFrame) -> tuple[dict[str, npt.NDArray[np.float32]], dict[str, npt.NDArray[np.float32]]]:
     # spectrograms is made from eeg
     # eeg_id -> spectrogram
     eeg_ids = df["eeg_id"].unique().to_list()
-    spectrograms_from_eeg = my_preprocessings.make_spectrograms_from_eeg(eeg_ids=eeg_ids, with_progress_bar=True)
+    spectrograms_from_eeg, signals = my_preprocessings.make_spectrograms_from_eeg(
+        eeg_ids=eeg_ids, with_progress_bar=True
+    )
     print("intersection of spectrograms & eeg_id", len(set(spectrograms_from_eeg.keys()) & set(df["eeg_id"])))
-    return spectrograms_from_eeg
+    return spectrograms_from_eeg, signals
 
 
 _SPECS_CACHE: dict[str, np.ndarray] | None = None
@@ -350,6 +400,20 @@ def _load_specs_from_eeg() -> dict[str, np.ndarray]:
     specs = np.load(constants.OUTPUT_DIR / "spectrograms_from_eeg.npy", allow_pickle=True).item()
     _SPECS_CACHE = specs
     return specs
+
+
+_SIGNALS_CACHE: dict[str, npt.NDArray[np.float32]] | None = None
+
+
+def _load_signals_from_eeg() -> dict[str, np.ndarray]:
+    global _SIGNALS_CACHE
+    if isinstance(_SIGNALS_CACHE, dict):
+        logger.info("Use cache spectrogram from eeg")
+        return _SIGNALS_CACHE
+    # shape: eeg_id -> signal: (4, 4, 10000)
+    signals = np.load(constants.OUTPUT_DIR / "signals_from_eeg.npy", allow_pickle=True).item()
+    _SIGNALS_CACHE = signals
+    return signals
 
 
 def init_train_dataloader(
@@ -366,16 +430,17 @@ def init_train_dataloader(
         print(train_df)
 
     if remake_specs:
-        spectrograms_from_eeg = _make_specs(train_df)
+        spectrograms_from_eeg, signals_from_eeg = _make_specs(train_df)
     else:
         spectrograms_from_eeg = _load_specs_from_eeg()
+        signals_from_eeg = _load_signals_from_eeg()
 
     ds = TrainHMSDataset(
         train_df.to_pandas(use_pyarrow_extension_array=True),
         spectrograms=host_specs,
         eeg_specs=spectrograms_from_eeg,
         transform=my_preprocessings.get_transforms(is_train=True),
-        mode="tta",
+        signals=signals_from_eeg,
     )
 
     dl = torch_data.DataLoader(
@@ -410,9 +475,10 @@ def init_valid_dataloader(
     print(f"host_specs: {len(host_specs) = }")
 
     if remake_specs:
-        spectrograms_from_eeg = _make_specs(valid_df)
+        spectrograms_from_eeg, signals_from_eeg = _make_specs(valid_df)
     else:
         spectrograms_from_eeg = _load_specs_from_eeg()
+        signals_from_eeg = _load_signals_from_eeg()
 
     ds = ValidHMSDataset(
         valid_df.to_pandas(use_pyarrow_extension_array=True),
@@ -420,7 +486,7 @@ def init_valid_dataloader(
         eeg_specs=spectrograms_from_eeg,
         # transform=my_preprocessings.get_transforms(is_train=True),
         transform=None,
-        mode="tta",
+        signals=signals_from_eeg,
     )
 
     dl = torch_data.DataLoader(
@@ -438,12 +504,41 @@ def init_valid_dataloader(
 
 
 def _test_train_dl() -> None:
+    import torch.nn as nn
+    import torchaudio
+
     dl = init_train_dataloader(fold=0, is_debug=True)
     batch = next(iter(dl))
     print(batch["x"].shape)
     print(batch["y"].shape)
     print(batch["y"])
     print(f"{batch['y'].min() = }, {batch['y'].max() = }")
+    # shape: (bs, 4, 10000)
+    print(f"{batch['signals'].shape = }")
+
+    from src.models import layers
+
+    spec_module = layers.init_spec_module()
+    dp_transform = layers.init_db_transform_module()
+    spec_aug = nn.Sequential(
+        # torchaudio.transforms.TimeStretch(fixed_rate=0.6, n_freq=128),
+        torchaudio.transforms.FrequencyMasking(freq_mask_param=15, iid_masks=False),
+        torchaudio.transforms.FrequencyMasking(freq_mask_param=80, iid_masks=False),
+        torchaudio.transforms.TimeMasking(time_mask_param=35, iid_masks=False, p=0.5),
+        torchaudio.transforms.TimeMasking(time_mask_param=70, iid_masks=False, p=0.5),
+    )
+    spec_aug = spec_aug.to("cuda")
+    # shape: (bs, 4, win_length, hop_length)
+    spec = spec_module(batch["signals"])
+    spec = dp_transform(spec)
+    width = (spec.shape[-1] // 32) * 32
+    print(f"1. {spec.shape = }")
+    spec = spec[:, :, :, :width]
+    print(f"2. {spec.shape = }")
+    spec = spec_aug(spec)
+    print(f"3. {spec.shape = }")
+    spec = spec.permute(0, 2, 3, 1)
+    print(f"4. {spec.shape = }")
 
 
 def _test_train_eeg_ds() -> None:
@@ -478,8 +573,8 @@ def _test_train_eeg_ds() -> None:
 
 
 def _test() -> None:
-    # _test_train_dl()
-    _test_train_eeg_ds()
+    _test_train_dl()
+    # _test_train_eeg_ds()
 
 
 if __name__ == "__main__":
