@@ -105,7 +105,7 @@ class TrainHMSDataset(torch_data.Dataset):
         if self.signals is not None:
             # shape: (4, 4, 10000)
             signals = self.signals[row["eeg_id"]]
-            signals = signals.mean(axis=1).reshape(4, -1)
+            # signals = signals.mean(axis=1).reshape(4, -1)
             signals = torch.tensor(signals, dtype=torch.float32)
         else:
             signals = torch.tensor(0)
@@ -174,7 +174,7 @@ class ValidHMSDataset(torch_data.Dataset):
         y_raw = torch.tensor(row[constants.TARGETS].to_numpy().astype(np.float32), dtype=torch.float32)
         if self.signals is not None:
             signals = self.signals[row["eeg_id"]]
-            signals = signals.mean(axis=1).reshape(4, -1)
+            # signals = signals.mean(axis=1).reshape(4, -1)
             signals = torch.tensor(signals, dtype=torch.float32)
         else:
             signals = torch.tensor(0)
@@ -361,6 +361,17 @@ def _load_df() -> pl.DataFrame:
         pl.col("spec_id").cast(pl.Utf8),
         pl.col("eeg_id").cast(pl.Utf8),
     ])
+
+    train_df = train_df.with_columns(
+        (
+            pl.col("seizure_vote")
+            + pl.col("lpd_vote")
+            + pl.col("gpd_vote")
+            + pl.col("lrda_vote")
+            + pl.col("grda_vote")
+            + pl.col("other_vote")
+        ).alias("total_evaluators")
+    )
 
     _set_df_cache(train_df)
     return train_df

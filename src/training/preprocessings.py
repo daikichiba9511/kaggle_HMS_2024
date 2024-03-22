@@ -535,6 +535,14 @@ def load_spectrograms(
     return all_specs
 
 
+def filter_more_df_by_votes(df: pl.DataFrame, n_votes: int = 10) -> pl.DataFrame:
+    return df.filter(pl.col("total_evaluators") >= n_votes)
+
+
+def filter_less_df_by_votes(df: pl.DataFrame, n_votes: int = 10) -> pl.DataFrame:
+    return df.filter(pl.col("total_evaluators") < n_votes)
+
+
 def _test_load_spec() -> None:
     specs = load_spectrograms(is_debug=True)
     print(specs)

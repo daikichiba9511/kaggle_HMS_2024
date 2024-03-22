@@ -15,7 +15,7 @@ import torchaudio
 from tqdm.auto import tqdm
 
 import wandb
-from src.exp.exp028 import config as my_config
+from src.exp.exp029 import config as my_config
 from src.models import layers as my_layers
 from src.training import data as my_data
 from src.training import losses as my_losses
@@ -38,6 +38,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--train-folds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
     return parser.parse_args()
+
+
+def make_specs_from_signals(
+    signals: torch.Tensor,
+    spec_module: torchaudio.transforms.Spectrogram,
+) -> torch.Tensor:
+    bs = signals.size(0)
+    # signal to specs
+    # signal shape: (bs, 4, 4, 10000)
+    specs = torch.zeros((bs, 4, 128, 256))
+    for k in range(4):
+        for kk in range(4):
+            # spec shape: (bs, 129, 257)
+            spec = spec_module(signals[:, k, kk, :])
+            # spec = time_stretch(spec)
+            spec = spec.abs().pow(2.0)
+            # mel_spec = mel_scale_transform(specs)
+            # mel_spec = db_transform(mel_spec)
+
+            height = (spec.shape[1] // 32) * 32
+            width = (spec.shape[2] // 32) * 32
+            spec = spec[:, :height, :width]
+            # Standardization -1 to 1
+            # mel_spec shape: (bs, 4, 128, 256)
+
+            specs[:, k, :, :] += spec
+            specs[:, k, :, :] /= 4
+
+    specs = (specs - specs.mean()) / (specs.std() + 1e-6)
+    specs = (specs - specs.min()) / (specs.max() - specs.min() + 1e-6)
+    return specs
 
 
 @my_tools.insert_duration_to_results(is_train=True)
@@ -70,24 +101,30 @@ def train_one_epoch(
         my_tools.unfreeze(model, keys)
 
     # Spectrogram module
-    time_mask_size = np.random.randint(35, 200)
-    freq_mask_size = np.random.randint(15, 120)
-    spec_module = my_layers.init_spec_module(power=None)
-    db_transform = my_layers.init_db_transform_module()
+    time_mask_size = np.random.randint(1, 256)
+    freq_mask_size = np.random.randint(1, 128)
+
+    # n_mels = 128
+    n_fft = 1024 // 2 // 2
+    hop_length = 10000 // 256
+    win_length = 128
+    spec_module = my_layers.init_spec_module(power=None, hop_length=hop_length, n_fft=n_fft, win_length=win_length)
+    # db_transform = my_layers.init_db_transform_module()
     # time_stretch = torchaudio.transforms.TimeStretch(fixed_rate=0.6, n_freq=513)
     spec_aug = nn.Sequential(
         torchaudio.transforms.FrequencyMasking(freq_mask_param=15, iid_masks=True),
         torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size, iid_masks=True),
-        torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size, iid_masks=True),
         torchaudio.transforms.TimeMasking(time_mask_param=35, iid_masks=False, p=0.5),
         torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size, iid_masks=True, p=0.5),
-        torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size, iid_masks=True, p=0.5),
     )
-    mel_scale_transform = torchaudio.transforms.MelScale(n_mels=128, sample_rate=10_000, n_stft=512)
+    # m = torchaudio.transforms.MelSpectrogram()
+    # mel_scale_transform = torchaudio.transforms.MelScale(
+    #     n_mels=n_mels, sample_rate=200, n_stft=n_fft // 2 + 1, f_min=0.0, f_max=20.0
+    # )
 
     # -- Mixup
     mixupper = my_preprocessings.Mixup(p=0.75, alpha=0.5)
-    if epoch < 14:
+    if epoch < 13:
         mixupper.init_lambda()
 
     # -- Train Loop
@@ -101,26 +138,11 @@ def train_one_epoch(
         with amp.autocast_mode.autocast(enabled=use_amp):
             # shape x: (bs, 128, 256, 8) at dim=3, 0~3: specs_from_eeg, 4~7: host_specs
             x = batch["x"].to(device, non_blocking=True, dtype=torch.float32)
-
-            # signal to specs
-            # signal shape: (bs, 4, 10000)
-            spec = spec_module(batch["signals"])
-            # spec = time_stretch(spec)
-            spec = spec.abs().pow(2.0)
-            height = (spec.shape[2] // 32) * 32
-            width = (spec.shape[3] // 32) * 32
-            spec = spec[:, :, :height, :width]
-            spec = spec_aug(spec)
-
-            mel_spec = mel_scale_transform(spec)
-            mel_spec = db_transform(mel_spec)
-            # spec shape: (bs, 4, 128, 256)
-            mel_spec = mel_spec.permute(0, 2, 3, 1)
-            # Standardization -1 to 1
-            mel_spec = (mel_spec + 40) / 40
-
-            mel_spec = mel_spec.to(device, non_blocking=True, dtype=torch.float32)
-            x = torch.cat([x, mel_spec], dim=3)
+            specs = make_specs_from_signals(signals=batch["signals"], spec_module=spec_module)
+            specs = spec_aug(specs)
+            specs = specs.permute(0, 2, 3, 1)
+            specs = specs.to(device, non_blocking=True, dtype=torch.float32)
+            x = torch.cat([x, specs], dim=3)
 
             if mixupper.do_mixup:
                 # sample内でのmixup
@@ -186,10 +208,13 @@ def valid_one_epoch(
     accs = my_tools.AverageMeter("accs")
 
     # Spectrogram module
-    time_mask_size = np.random.randint(35, 200)
-    freq_mask_size = np.random.randint(15, 120)
-    spec_module = my_layers.init_spec_module(power=None)
-    db_transform = my_layers.init_db_transform_module()
+    # time_mask_size = np.random.randint(35, 200)
+    # freq_mask_size = np.random.randint(15, 120)
+    n_fft = 1024 // 2 // 2
+    hop_length = 10000 // 256
+    win_length = 128
+    spec_module = my_layers.init_spec_module(power=None, hop_length=hop_length, n_fft=n_fft, win_length=win_length)
+    # db_transform = my_layers.init_db_transform_module()
     # time_stretch = torchaudio.transforms.TimeStretch(fixed_rate=0.6, n_freq=513)
     # spec_aug = nn.Sequential(
     #     torchaudio.transforms.FrequencyMasking(freq_mask_param=15, iid_masks=True),
@@ -197,7 +222,7 @@ def valid_one_epoch(
     #     torchaudio.transforms.TimeMasking(time_mask_param=35, iid_masks=False, p=0.5),
     #     torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size, iid_masks=True, p=0.5),
     # )
-    mel_scale_transform = torchaudio.transforms.MelScale(n_mels=128, sample_rate=10_000, n_stft=512)
+    # mel_scale_transform = torchaudio.transforms.MelScale(n_mels=128, sample_rate=10_000, n_stft=512)
 
     pbar = tqdm(enumerate(dl_valid), total=len(dl_valid), desc=f"Valid {epoch}")
 
@@ -216,23 +241,10 @@ def valid_one_epoch(
 
             # signal to specs
             # signal shape: (bs, 4, 10000)
-            spec = spec_module(batch["signals"])
-            # spec = time_stretch(spec)
-            spec = spec.abs().pow(2.0)
-            height = (spec.shape[2] // 32) * 32
-            width = (spec.shape[3] // 32) * 32
-            spec = spec[:, :, :height, :width]
-            # spec = spec_aug(spec)
-
-            mel_spec = mel_scale_transform(spec)
-            mel_spec = db_transform(mel_spec)
-            # spec shape: (bs, 4, 128, 256)
-            mel_spec = mel_spec.permute(0, 2, 3, 1)
-            # Standardization -1 to 1
-            mel_spec = (mel_spec + 40) / 40
-
-            mel_spec = mel_spec.to(device, non_blocking=True, dtype=torch.float32)
-            x = torch.cat([x, mel_spec], dim=3)
+            specs = make_specs_from_signals(signals=batch["signals"], spec_module=spec_module)
+            specs = specs.permute(0, 2, 3, 1)
+            specs = specs.to(device, non_blocking=True, dtype=torch.float32)
+            x = torch.cat([x, specs], dim=3)
 
             out = model(x)
 
@@ -308,9 +320,12 @@ def main() -> None:
             continue
         my_utils_common.seed_everything(cfg.seed)
 
-        run = wandb.init(
-            project="kaggle-hms-2024", name=f"{cfg.name}_fold{fold}", config=dataclasses.asdict(cfg), reinit=True
-        )
+        if not args.debug:
+            run = wandb.init(
+                project="kaggle-hms-2024", name=f"{cfg.name}_fold{fold}", config=dataclasses.asdict(cfg), reinit=True
+            )
+        else:
+            run = None
         my_tools.train_one_fold(
             cfg=cfg,
             fold=fold,
