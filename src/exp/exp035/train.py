@@ -139,6 +139,7 @@ def train_one_epoch(
             # shape x: (bs, 128, 256, 8) at dim=3, 0~3: specs_from_eeg, 4~7: host_specs
             x = batch["x"].to(device, non_blocking=True, dtype=torch.float32)
 
+            # -- Signal To MelSpectrograms
             specs = make_specs_from_signals(signals=batch["signals"], spec_module=spec_module)
             specs = db_transform(specs)
             specs = spec_aug(specs)
@@ -217,10 +218,18 @@ def valid_one_epoch(
     accs = my_tools.AverageMeter("accs")
 
     # Spectrogram module
-    n_fft = 1024
-    hop_length = 10000 // 256
-    win_length = 128
-    spec_module = my_layers.init_spec_module(power=None, hop_length=hop_length, n_fft=n_fft, win_length=win_length)
+    spec_module = torchaudio.transforms.MelSpectrogram(
+        sample_rate=200,
+        n_fft=1024,
+        hop_length=10000 // 256,
+        win_length=128,
+        n_mels=128,
+        f_min=0,
+        f_max=20,
+        power=2.0,
+        pad_mode="constant",
+        center=True,
+    )
     db_transform = my_layers.init_db_transform_module()
 
     spec_offsets = []
@@ -237,14 +246,19 @@ def valid_one_epoch(
         with amp.autocast_mode.autocast(enabled=use_amp), torch.inference_mode():
             x = batch["x"].to(device, non_blocking=True, dtype=torch.float32)
 
-            # signal to specs
-            # signal shape: (bs, 4, 10000)
+            # -- Signal To MelSpectrograms
             specs = make_specs_from_signals(signals=batch["signals"], spec_module=spec_module)
             specs = db_transform(specs)
+
+            # clip outliers for stability and standardization
             specs = torch.clamp(specs, min=np.exp(-4.0), max=np.exp(8.0))
             specs = torch.log(specs)
+            specs = (specs - specs.mean()) / (specs.std() + 1e-6)
+
             specs = specs.permute(0, 2, 3, 1)
             specs = specs.to(device, non_blocking=True, dtype=torch.float32)
+
+            # x shape: (bs, 128, 256, 12)
             x = torch.cat([x, specs], dim=3)
 
             out = model(x)
