@@ -428,9 +428,20 @@ def _load_signals_from_eeg() -> dict[str, np.ndarray]:
 
 
 def init_train_dataloader(
-    fold: int, batch_size: int = 8 * 3, num_workers: int = 4, is_debug: bool = False, remake_specs: bool = False
+    fold: int,
+    batch_size: int = 8 * 3,
+    num_workers: int = 4,
+    is_debug: bool = False,
+    remake_specs: bool = False,
+    step1: bool = False,
+    step2: bool = False,
 ) -> torch_data.DataLoader[TrainEEGOutput]:
     train_df = load_train_df(fold)
+    if step1:
+        train_df = my_preprocessings.filter_less_df_by_votes(train_df)
+    elif step2:
+        train_df = my_preprocessings.filter_more_df_by_votes(train_df)
+
     # spectrograms was prepared by the host
     # spec_id -> spectrogram
     host_specs = my_preprocessings.load_spectrograms(with_progress_bar=True, is_debug=is_debug)
@@ -469,9 +480,20 @@ def init_train_dataloader(
 
 
 def init_valid_dataloader(
-    fold: int, batch_size: int = 8 * 3, num_workers: int = 4, is_debug: bool = False, remake_specs: bool = False
+    fold: int,
+    batch_size: int = 8 * 3,
+    num_workers: int = 4,
+    is_debug: bool = False,
+    remake_specs: bool = False,
+    step1: bool = False,
+    step2: bool = False,
 ) -> torch_data.DataLoader[ValidEEGOutput]:
     valid_df = load_valid_df(fold)
+    if step1:
+        valid_df = my_preprocessings.filter_less_df_by_votes(valid_df)
+    elif step2:
+        valid_df = my_preprocessings.filter_more_df_by_votes(valid_df)
+
     if is_debug:
         spec_ids = valid_df["spec_id"].to_list()[:20]
         fps = [fp for fp in constants.DATA_DIR.joinpath("train_spectrograms").glob("*.parquet") if fp.stem in spec_ids]

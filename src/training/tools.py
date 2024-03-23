@@ -319,6 +319,7 @@ def train_one_fold(
     dl_valid: torch_data.DataLoader | None = None,
     use_ema: bool = False,
     compile_config: my_model_common.CompileConfig | None = None,
+    pretrained_weights_fp: pathlib.Path | None = None,
 ) -> None:
     """1fold分の学習を行う
     Args:
@@ -337,6 +338,9 @@ def train_one_fold(
     model = my_model_common.init_model(
         model_name=cfg.model_config.model_name, model_params=cfg.model_config.model_params
     )
+    if pretrained_weights_fp is not None:
+        logger.info(f"Load pretrained weights from {pretrained_weights_fp}")
+        model.load_state_dict(torch.load(pretrained_weights_fp))
     ema_model = timm_utils.ModelEmaV2(model, decay=0.998) if use_ema else None
     if compile_config.do_model_compile:
         logger.info("Compile model")

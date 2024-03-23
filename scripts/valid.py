@@ -1,3 +1,4 @@
+import json
 import argparse
 import dataclasses
 import importlib
@@ -77,8 +78,8 @@ def main() -> None:
         # pathlib.Path("output/exp004/best_exp004_fold3.pth"),
         # pathlib.Path("output/exp004/best_exp004_fold4.pth"),
         # =================================================
-        *[pathlib.Path(f"output/exp{exp_ver}/best_exp{exp_ver}_fold{i}.pth") for i in range(1)],
-        # *[pathlib.Path(f"output/exp{exp_ver}/best_exp{exp_ver}_fold{i}.pth") for i in range(3)],
+        # *[pathlib.Path(f"output/exp{exp_ver}/best_exp{exp_ver}_fold{i}.pth") for i in range(1)],
+        *[pathlib.Path(f"output/exp{exp_ver}/best_exp{exp_ver}_fold{i}.pth") for i in range(3)],
         # *[pathlib.Path(f"output/{exp_ver}/best_{exp_ver}_fold{i}.pth") for i in range(5)],
     ]
 
@@ -126,11 +127,14 @@ def main() -> None:
             solution=solution,
             row_id_column_name="eeg_id",
         )
-        scores.append(score)
+        scores.append({"fold": fold, "score": float(score)})
         logger.info(f"{score = }")
 
-    mean_oof_score = np.mean(scores)
+    mean_oof_score = np.mean([score["score"] for score in scores])
     logger.info(f"{mean_oof_score = } { scores = }")
+    save_dir = pathlib.Path("output") / f"exp{exp_ver}"
+    with save_dir.joinpath("oof_score.json").open("w") as f:
+        json.dump({"oof_score": float(mean_oof_score), "scores": scores}, f)
 
 
 if __name__ == "__main__":

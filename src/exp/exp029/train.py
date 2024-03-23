@@ -7,11 +7,11 @@ import polars as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchaudio
 from timm import utils as timm_utils
 from torch import backends
 from torch.cuda import amp
 from torch.utils import data as torch_data
-import torchaudio
 from tqdm.auto import tqdm
 
 import wandb
@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
 def make_specs_from_signals(
     signals: torch.Tensor,
     spec_module: torchaudio.transforms.Spectrogram,
+    time_stretch: torchaudio.transforms.TimeStretch | None = None,
 ) -> torch.Tensor:
     bs = signals.size(0)
     # signal to specs
@@ -52,7 +53,8 @@ def make_specs_from_signals(
         for kk in range(4):
             # spec shape: (bs, 129, 257)
             spec = spec_module(signals[:, k, kk, :])
-            # spec = time_stretch(spec)
+            if time_stretch is not None:
+                spec = time_stretch(spec)
             spec = spec.abs().pow(2.0)
             # mel_spec = mel_scale_transform(specs)
             # mel_spec = db_transform(mel_spec)
@@ -101,8 +103,10 @@ def train_one_epoch(
         my_tools.unfreeze(model, keys)
 
     # Spectrogram module
-    time_mask_size = np.random.randint(1, 256)
-    freq_mask_size = np.random.randint(1, 128)
+    time_mask_size1 = np.random.randint(1, 256)
+    freq_mask_size1 = np.random.randint(1, 128)
+    time_mask_size2 = np.random.randint(1, 256)
+    freq_mask_size2 = np.random.randint(1, 128)
 
     # n_mels = 128
     n_fft = 1024 // 2 // 2
@@ -113,9 +117,11 @@ def train_one_epoch(
     # time_stretch = torchaudio.transforms.TimeStretch(fixed_rate=0.6, n_freq=513)
     spec_aug = nn.Sequential(
         torchaudio.transforms.FrequencyMasking(freq_mask_param=15, iid_masks=True),
-        torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size, iid_masks=True),
+        torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size1, iid_masks=True),
+        torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size2, iid_masks=True),
         torchaudio.transforms.TimeMasking(time_mask_param=35, iid_masks=False, p=0.5),
-        torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size, iid_masks=True, p=0.5),
+        torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size1, iid_masks=True, p=0.5),
+        torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size2, iid_masks=True, p=0.5),
     )
     # m = torchaudio.transforms.MelSpectrogram()
     # mel_scale_transform = torchaudio.transforms.MelScale(

@@ -75,6 +75,8 @@ class TrainConfigImpl(my_tools.TrainConfig):
             # batch_size=8 * 2,
             num_workers=4,
             is_debug=False,
+            step1=True,
+            step2=False,
         )
     )
 
@@ -87,6 +89,8 @@ class ValidConfigImpl(my_tools.ValidConfig):
             # batch_size=8 * 2,
             num_workers=4,
             is_debug=False,
+            step1=True,
+            step2=False,
         )
     )
 
