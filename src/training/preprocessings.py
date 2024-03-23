@@ -9,6 +9,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import polars as pl
+import pywt
 import torch
 from scipy import signal
 
@@ -204,6 +205,30 @@ def mu_law_encoding(data: npt.NDArray[np.floating], mu: int) -> npt.NDArray[np.f
 def quantize_data(data: npt.NDArray[np.floating], classes: int) -> npt.NDArray[np.floating]:
     mu_x = mu_law_encoding(data, classes)
     return mu_x
+
+
+def denoise_low_freqs(
+    data: npt.NDArray[np.floating], wavelet: str = "db4", level: int = 4
+) -> npt.NDArray[np.floating]:
+    """denoise the low frequency noise in the data using wavelet transform
+
+    Args:
+        data: input data, shape (n_channels, n_samples), (4, 10000)
+
+    Returns:
+        processed_data: denoised data
+    """
+    processed_data = []
+    for sig in data:
+        coeffs = pywt.wavedec(sig, wavelet, level=level)
+        # Zero out the approximation coefficients to remove low-frequency noise
+        coeffs[0] = np.zeros_like(coeffs[0])
+        # Reconstruct the signal using the modified coefficients
+        processed_signal = pywt.waverec(coeffs, wavelet)
+        processed_data.append(processed_signal)
+    processed_data = np.array(processed_data)
+    original_signal_length = data.shape[1]
+    return processed_data[:, :original_signal_length]
 
 
 def min_max_normalization(data: npt.NDArray[np.floating], eps: float = 1e-6) -> npt.NDArray[np.floating]:

@@ -15,16 +15,18 @@ dependencies = [
     "seaborn>=0.13.0",
     "lightgbm>=4.3.0",
     # "torch==2.1.2+cu118",
-    "torch==2.2.1",
-    "torchvision==0.17.1",
+    # "torch==2.2.1",
+    "torch==2.2.1+cu118",
+    "torchvision==0.17.1+cu118",
     "timm>=0.9.12",
     "opencv-python>=4.9.0.80",
     "albumentations>=1.3.1",
     # "h5py>=3.10.0",
-    "monai[all]>=1.3.0",
+    # "monai[all]>=1.3.0",
     "torchvision>=0.17.1",
     "librosa>=0.10.1",
     "torchaudio>=2.2.1",
+    "pywavelets>=1.5.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"
@@ -56,7 +58,7 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
-# Reference: 
+# Reference:
 # https://rye-up.com/guide/faq/
 [[tool.rye.sources]]
 name = "pytorch"
