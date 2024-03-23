@@ -98,7 +98,7 @@ class ValidConfigImpl(my_tools.ValidConfig):
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
     base: str = "exp029"
-    diff: str = "training two stage"
+    diff: str = "1st stage training of two stage training"
     name: str = "exp030"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name

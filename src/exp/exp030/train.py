@@ -326,6 +326,7 @@ def main() -> None:
             )
         else:
             run = None
+
         my_tools.train_one_fold(
             cfg=cfg,
             fold=fold,
