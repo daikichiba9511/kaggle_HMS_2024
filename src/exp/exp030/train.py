@@ -7,11 +7,11 @@ import polars as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchaudio
 from timm import utils as timm_utils
 from torch import backends
 from torch.cuda import amp
 from torch.utils import data as torch_data
-import torchaudio
 from tqdm.auto import tqdm
 
 import wandb
