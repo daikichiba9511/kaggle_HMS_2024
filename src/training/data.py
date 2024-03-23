@@ -490,9 +490,15 @@ def init_valid_dataloader(
 ) -> torch_data.DataLoader[ValidEEGOutput]:
     valid_df = load_valid_df(fold)
     if step1:
+        logger.info("Filter less df by votes at 1st stage")
+        before_len = len(valid_df)
         valid_df = my_preprocessings.filter_less_df_by_votes(valid_df)
+        logger.info(f"Filtered less df by votes at 1st stage: {before_len = } -> {len(valid_df) = }")
     elif step2:
+        logger.info("Filter more df by votes at 2nd stage")
+        before_len = len(valid_df)
         valid_df = my_preprocessings.filter_more_df_by_votes(valid_df)
+        logger.info(f"Filtered more df by votes at 2nd stage: {before_len = } -> {len(valid_df) = }")
 
     if is_debug:
         spec_ids = valid_df["spec_id"].to_list()[:20]
