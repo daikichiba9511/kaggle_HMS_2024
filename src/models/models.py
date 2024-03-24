@@ -224,6 +224,166 @@ class HMSTransformerModel(nn.Module):
 
 
 @dataclasses.dataclass
+class HMS1DSpecTransformerModelParams:
+    model_name: str
+    pretrained: bool
+    transformer_model_name: str = "maxvit_ti_tf_512"
+
+
+class HMS1DSpecTransformerModel(nn.Module):
+    def __init__(
+        self: Self, model_name: str, pretrained: bool, transformer_model_name: str = "maxvit_tiny_tf_512"
+    ) -> None:
+        super().__init__()
+        self.pretrained = pretrained
+        self.backbone = timm.create_model(
+            model_name,
+            pretrained=pretrained,
+            features_only=True,
+        )
+        self.backbone_transformer = timm.create_model(
+            transformer_model_name,
+            pretrained=pretrained,
+            features_only=True,
+        )
+
+        backbone_num_features = self.backbone.feature_info.channels()[-1]
+        backbone_transformer_num_features = self.backbone_transformer.feature_info[-1]["num_chs"]
+        self.num_features = backbone_num_features + backbone_transformer_num_features
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.head = nn.Sequential(
+            nn.Flatten(),
+            nn.Dropout(0.5, inplace=True),
+            nn.Linear(self.num_features, 6),
+        )
+        self.cnn_spec = my_feature_extractor.CNNSpectgram(
+            in_channels=4,
+            base_filters=128,  # height of the image
+            kernel_size=(128, 64, 32, 16),  # out_channels = len(kernel_size)
+            stride=10000 // 256,  # stride = len(x) // width
+            reinit=True,
+        )
+
+    def _consolidate_patches_into_a_image(self: Self, x: torch.Tensor) -> torch.Tensor:
+        """make a spectrogram from the eeg and the spectrogram
+
+        Args:
+            x (torch.Tensor): input tensor, shape (bs, 128, 256, 8/12/16)
+                8: spectrogram + eeg
+                12: spectrogram + eeg + spectrogram from signals
+                16: spectrogram + eeg + spectrogram from signals + wavegram
+
+        Returns:
+            x: transformed tensor, shape (bs, 3, 512, 512)
+        """
+        # shape: (bs, 128, 256, 4)
+        # spectrograms = [x[:, i : i + 1, :, :] for i in range(4)]
+        spectrograms = [x[:, :, :, i : i + 1] for i in range(4)]
+        # shape: (bs, 512, 256, 4)
+        spectrograms = torch.cat(spectrograms, dim=1)
+
+        # shape: (bs, 128, 256, 4)
+        eegs = [x[:, :, :, i : i + 1] for i in range(4, 8)]
+        # shape: (bs, 512, 256, 4)
+        eegs = torch.cat(eegs, dim=1)
+
+        if x.shape[3] == 12:
+            # shape: (bs, 128, 256, 4)
+            specs_from_signals = [x[:, :, :, i : i + 1] for i in range(8, 12)]
+            # shape: (bs, 512, 256, 4)
+            specs_from_signals = torch.cat(specs_from_signals, dim=1)
+            specs_from_signals = torch.cat([specs_from_signals, specs_from_signals], dim=2)
+
+            x = torch.cat([spectrograms, eegs], dim=2)
+            # exp026
+            x = torch.cat([x, specs_from_signals, x], dim=3)
+            # exp027
+            # x = torch.cat([x, specs_from_signals, specs_from_signals], dim=3)
+        elif x.shape[3] == 16:
+            x = torch.cat([spectrograms, eegs], dim=2)
+
+            # shape: (bs, 128, 256, 4)
+            specs_from_signals = [x[:, :, :, i : i + 1] for i in range(8, 12)]
+            # shape: (bs, 512, 256, 4)
+            specs_from_signals = torch.cat(specs_from_signals, dim=1)
+            specs_from_signals = torch.cat([specs_from_signals, specs_from_signals], dim=2)
+
+            # shape: (bs, 128, 256, 4)
+            wavegram = [x[:, :, :, i : i + 1] for i in range(12, 16)]
+            wavegram = torch.cat(wavegram, dim=1)
+            wavegram = torch.cat([wavegram, wavegram], dim=2)
+
+            x = torch.cat([x, wavegram, specs_from_signals], dim=3)
+
+        else:
+            x = torch.cat([spectrograms, eegs], dim=2)
+            x = torch.cat([x, x, x], dim=3)
+
+        # region x {spectrogram, eeg} のスペクトログラム(128, 256)の貼り合わせ x 3 (channel direction)
+        # |-----------|
+        # |  |  |  |  |
+        # |  |  |  |  |
+        # |-----------|
+        # |  |  |  |  |
+        # |  |  |  |  |
+        # |-----------|
+        # shape: (bs, 3, 512, 512)
+        x = x.permute(0, 3, 1, 2)
+        return x
+
+    def forward(
+        self: Self,
+        x: torch.Tensor,
+        do_mixup: bool = False,
+        lam: float | None = None,
+        y: torch.Tensor | None = None,
+        bboxes: list[list[int]] | None = None,
+        k_list: list[int] | None = None,
+        a_list: list[float] | None = None,
+        signals: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if signals is not None:
+            # shape: (bs, 4, 128, 256)
+            wavegram = self.cnn_spec(signals)
+            x = torch.cat([x, wavegram.permute(0, 2, 3, 1)], dim=-1)
+
+        img = self._consolidate_patches_into_a_image(x)
+        # -- CutMixup
+        if lam is not None and do_mixup:
+            if bboxes is not None and y is not None and k_list is not None and a_list is not None:
+                x, y = my_preprocess.torch_cutmix(
+                    img=img,
+                    labels=y,
+                    a_list=a_list,
+                    bboxes=bboxes,
+                    k_list=k_list,
+                )
+                img = lam * x + (1.0 - lam) * x.flip(0)
+                y = lam * y + (1.0 - lam) * y.flip(0)
+            else:
+                img = lam * img + (1.0 - lam) * img.flip(0)
+                y = None
+
+        x1 = self.backbone_transformer(img)
+        # shape: (bs, 768, 16, 16)
+        x1 = x1[-1]
+
+        x = self.backbone(img)
+        # shape: (bs, 320, 16, 16)
+        x = x[-1]
+
+        # 情報の結合の仕方がどれがいいのか, add/concat
+        x = torch.cat([x, x1], dim=1)
+        x = self.pool(x)
+        logits = self.head(x)
+
+        out = {"logits": logits}
+        if y is not None:
+            out["y"] = y
+        return out
+
+
+@dataclasses.dataclass
 class GRUParams:
     hidden_size: int = 128
     num_layers: int = 1

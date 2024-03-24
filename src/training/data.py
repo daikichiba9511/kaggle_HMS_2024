@@ -101,6 +101,7 @@ class TrainHMSDataset(torch_data.Dataset):
 
         x = torch.tensor(x, dtype=torch.float32)
         y = torch.tensor(y, dtype=torch.float32)
+        yraw = torch.tensor(row[constants.TARGETS].to_numpy().astype(np.float32), dtype=torch.float32)
 
         if self.signals is not None:
             # shape: (4, 4, 10000)
@@ -116,6 +117,7 @@ class TrainHMSDataset(torch_data.Dataset):
             "eeg_id": row["eeg_id"],
             "spec_id": row["spec_id"],
             "signals": signals,
+            "y_raw": yraw,
         }
 
 

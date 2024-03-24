@@ -1,5 +1,6 @@
 import argparse
 import dataclasses
+import pathlib
 import pprint
 
 import numpy as np
@@ -335,6 +336,7 @@ def main() -> None:
             valid_one_epoch=valid_one_epoch,
             dl_valid=my_data.init_valid_dataloader(fold, **cfg.valid_config.dataloader_params),
             use_ema=True,
+            pretrained_weights_fp=pathlib.Path(f"output/exp030/best_exp030_fold{fold}.pth"),
         )
         if run is not None:
             run.finish()

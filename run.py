@@ -9,11 +9,13 @@ def run_cmd(cmd: list[str]) -> None:
 
 exp_configs = [
     # ("exp029", [0, 1, 2]),
-    ("exp030", [0, 1, 2]),
-    ("exp031", [0, 1, 2]),
+    # ("exp030", [0, 1, 2]),
+    # ("exp031", [0, 1, 2]),
     ("exp032", [0, 1, 2]),
     ("exp033", [0, 1, 2]),
     ("exp034", [0, 1, 2]),
+    ("exp035", [0, 1, 2]),
+    ("exp036", [0, 1, 2]),
 ]
 
 for exp_ver, train_folds in exp_configs:

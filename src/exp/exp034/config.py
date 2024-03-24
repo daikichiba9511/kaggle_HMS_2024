@@ -90,7 +90,7 @@ class ValidConfigImpl(my_tools.ValidConfig):
             num_workers=4,
             is_debug=False,
             step1=False,
-            step2=True,
+            step2=False,
         )
     )
 

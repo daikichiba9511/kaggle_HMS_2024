@@ -17,10 +17,10 @@ class ModelConfigImpl(my_models_common.ModelConfig):
         default_factory=lambda: my_models_common.HMSTransformerModelParams(
             pretrained=True,
             # model_name="tf_efficientnet_b0.ns_jft_in1k",
-            model_name="tf_efficientnet_b2.ns_jft_in1k",
+            # model_name="tf_efficientnet_b2.ns_jft_in1k",
+            model_name="tf_efficientnetv2_b0.in1k",
             # model_name="eca_nfnet_l0",
-            # model_name="eca_nfnet_l0",
-            transformer_model_name="maxvit_small_tf_512",
+            transformer_model_name="maxvit_tiny_tf_512",
         )
     )
 
@@ -33,7 +33,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
         default_factory=lambda: cast(
             my_optim.AdamWParams,
             dict(
-                lr=1e-4,
+                lr=5e-4,
                 weight_decay=1e-2,
                 eps=1e-6,
             ),
@@ -45,7 +45,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
             my_optim.SchduleParams,
             dict(
                 t_initial=10,
-                lr_min=1e-6,
+                lr_min=1e-7,
                 warmup_prefix=False,
                 warmup_t=1,
                 warmup_lr_init=1e-6,
@@ -71,7 +71,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
 
     dataloader_params: dict[str, Any] = dataclasses.field(
         default_factory=lambda: dict(
-            batch_size=8 * 1,  # VRAM 15GB
+            batch_size=8 * 2,  # VRAM 15GB
             # batch_size=8 * 2,
             num_workers=4,
             is_debug=False,
