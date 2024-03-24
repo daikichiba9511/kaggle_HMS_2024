@@ -17,8 +17,21 @@ class GeM(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return gem(x, p=self.p, eps=self.eps)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(p={self.p}, eps={self.eps})"
+
+
+class MixupForwarder(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x: torch.Tensor, lam: float, y: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
+        x = lam * x + (1 - lam) * x.flip(0)
+        out = {"x": x}
+        if y is not None:
+            y = lam * y + (1 - lam) * y.flip(0)
+            out["y"] = y
+        return out
 
 
 def init_spec_module(

@@ -57,6 +57,7 @@ class TrainHMSDataset(torch_data.Dataset):
         eeg_specs: dict[str, npt.NDArray[np.float32]],
         transform: A.Compose | None = None,
         signals: dict[str, npt.NDArray[np.float32]] | None = None,
+        random_crop_signal_augmentation: bool = False,
     ) -> None:
         self.df = df
         self.spectrograms = spectrograms
