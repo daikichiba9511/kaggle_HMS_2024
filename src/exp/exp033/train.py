@@ -15,7 +15,7 @@ from torch.utils import data as torch_data
 from tqdm.auto import tqdm
 
 import wandb
-from src.exp.exp030 import config as my_config
+from src.exp.exp033 import config as my_config
 from src.models import layers as my_layers
 from src.training import data as my_data
 from src.training import losses as my_losses
