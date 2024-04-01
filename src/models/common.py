@@ -13,7 +13,7 @@ from src.models.models import (
     HMS1DParallel2WayConvParams,
     HMS1DParallelConvParams,
     HMSCNNSpecFEParams,
-    HMSModel,
+    HMSModelParams,
     HMSTransformerModel,
     HMSTransformerModelParams,
 )

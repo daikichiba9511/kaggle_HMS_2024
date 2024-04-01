@@ -35,7 +35,6 @@ class TrainConfigImpl(my_tools.TrainConfig):
             my_optim.AdamWParams,
             dict(
                 lr=1e-3,
-                # lr=5e-4,
                 weight_decay=1e-2,
                 eps=1e-6,
             ),
@@ -77,8 +76,8 @@ class TrainConfigImpl(my_tools.TrainConfig):
             batch_size=8 * 4,
             num_workers=4,
             is_debug=False,
-            step1=True,
-            step2=False,
+            step1=False,
+            step2=True,
         )
     )
 
@@ -91,20 +90,20 @@ class ValidConfigImpl(my_tools.ValidConfig):
             batch_size=8 * 4,
             num_workers=4,
             is_debug=False,
-            step1=True,
-            step2=False,
+            step1=False,
+            step2=True,
         )
     )
 
 
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
-    base: str = "exp038"
-    diff: str = """1st stage training of two stage training.
+    base: str = "exp039"
+    diff: str = """2nd stage training of two stage training.
     add random power spec
     add reduce high freq noise
     """
-    name: str = "exp039"
+    name: str = "exp040"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name
 

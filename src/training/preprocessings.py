@@ -2,6 +2,7 @@ import pathlib
 import random
 from collections.abc import Iterable, Sequence
 from logging import getLogger
+from typing import TypeVar
 
 import albumentations as A
 import librosa
@@ -137,6 +138,42 @@ def torch_cutmix(
     return imgs, lbls
 
 
+def cutmix_on_waveform(
+    data: torch.Tensor, labels: torch.Tensor, alpha: float = 1.0
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Cutmix on waveform
+
+    Args:
+        data: input data (bs, 4, 10000)
+        labels: labels for the data (bs, 6)
+        alpha: alpha value
+    """
+    bs = data.size(0)
+    width = data.size(2)
+    sigs = []
+    lbls = []
+    lams = []
+    for i in range(bs):
+        lam = np.random.beta(alpha, alpha)
+        k = np.random.randint(bs)
+
+        cut_rate = np.sqrt(1.0 - lam)
+        cut_width = int(width * cut_rate)
+        cx = np.random.randint(width)
+
+        sig = torch.concat([data[i, :, :cx], data[k, :, cx : cx + cut_width], data[i, :, cx + cut_width :]], dim=1)
+        lbl = lam * labels[i] + (1 - lam) * labels[k]
+
+        sigs.append(sig.unsqueeze(0))
+        lbls.append(lbl.unsqueeze(0))
+        lams.append(lam)
+
+    sigs = torch.concat(sigs, dim=0)
+    lbls = torch.concat(lbls, dim=0)
+    # lams = torch.tensor(lams)
+    return sigs, lbls
+
+
 def get_transforms(is_train: bool) -> A.Compose:
     if is_train:
         params1 = {
@@ -157,15 +194,15 @@ def get_transforms(is_train: bool) -> A.Compose:
             "fill_value": (0, 1, 2, 3, 4, 5, 6, 7),
         }
         return A.Compose([
-            A.XYMasking(**params1, p=0.5),
-            A.XYMasking(**params2, p=0.5),
-            A.XYMasking(**params3, p=0.5),
-            A.XYMasking(**params3, p=0.5),  # exp028
+            A.XYMasking(**params1, p=0.75),
+            A.XYMasking(**params2, p=0.75),
+            A.XYMasking(**params3, p=0.75),
+            A.XYMasking(**params3, p=0.75),  # exp028
             # A.HorizontalFlip(p=0.5), # exp001 ~ exp004
             A.VerticalFlip(p=0.5),
             A.OneOf([
-                A.XYMasking(mask_x_length=5, mask_y_length=16, num_masks_x=1, num_masks_y=1, fill_value=0, p=0.5),
-                A.CoarseDropout(max_holes=4),
+                A.XYMasking(mask_x_length=5, mask_y_length=16, num_masks_x=1, num_masks_y=1, fill_value=0, p=0.75),
+                A.CoarseDropout(max_holes=4, p=0.75),
             ]),
             # ToTensorV2(),
         ])
@@ -231,11 +268,27 @@ def denoise_low_freqs(
     return processed_data[:, :original_signal_length]
 
 
-def min_max_normalization(data: npt.NDArray[np.floating], eps: float = 1e-6) -> npt.NDArray[np.floating]:
-    mean = data.mean()
-    std = data.std()
-    data = (data - mean) / (std + eps)
-    return data
+_T = TypeVar("_T", npt.NDArray[np.floating], torch.Tensor)
+
+
+def mean_std_normalization(data: _T, eps: float = 1e-6) -> _T:
+    mean_ = float(data.mean())
+    std_ = float(data.std())
+    return (data - mean_) / (std_ + eps)
+
+
+def min_max_normalization(data: _T, eps: float = 1e-6) -> _T:
+    min_ = float(data.min())
+    max_ = float(data.max())
+    return (data - min_) / (max_ - min_ + eps)
+
+
+def batch_min_max_normalization(data: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    bs = data.size(0)
+    data_ = data.view(bs, -1)
+    min_ = torch.amin(data_, dim=1)
+    max_ = torch.amax(data_, dim=1)
+    return (data - min_) / (max_ - min_ + eps)
 
 
 def preprocess_raw_signal(
@@ -252,6 +305,35 @@ def preprocess_raw_signal(
         data = butter_lowpass_filter(data)
         data = quantize_data(data, classes)
     return data
+
+
+def add_white_noise(data: torch.Tensor, noise_intensity: float = 0.01) -> torch.Tensor:
+    noise = torch.randn_like(data) * noise_intensity
+    return data + noise
+
+
+def augment_signal_takig_label_into_account(
+    data: torch.Tensor, labels: torch.Tensor, p: float = 0.5
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+
+    Args:
+        data: input data as signal(=waveform), (bs, n_channels, n_samples)
+        labels: labels for the data, (bs, n_classes)
+
+    Returns:
+        augmented_data: augmented data
+        augmented_labels: augmented labels
+    """
+    if random.random() > p:
+        return data, labels
+
+    # seizure: 0, lpd: 1, gpd: 2, lrda: 3, grda: 4, others: 5
+    # 同時に起こりうる (lrda, gpd), (lrda, seizure)
+    # 同時に起こらない (gpd, lpd), (grda, lpd)
+    # を考慮してaugmentationする
+    bs = data.size(0)
+    raise NotImplementedError("augment_signal_takig_label_into_account is not implemented")
 
 
 def spectrogram_from_egg(parquet_fp: pathlib.Path, offset: int | None = None) -> tuple[np.ndarray, np.ndarray]:

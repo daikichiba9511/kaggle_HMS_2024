@@ -441,9 +441,13 @@ def init_train_dataloader(
 ) -> torch_data.DataLoader[TrainEEGOutput]:
     train_df = load_train_df(fold)
     if step1:
+        before_len = len(train_df)
         train_df = my_preprocessings.filter_less_df_by_votes(train_df)
+        logger.info(f"\n\nFiltered less df by votes at 1st stage: {before_len = } -> {len(train_df) = }\n")
     elif step2:
+        before_len = len(train_df)
         train_df = my_preprocessings.filter_more_df_by_votes(train_df)
+        logger.info(f"\n\nFiltered less df by votes at 1st stage: {before_len = } -> {len(train_df) = }\n")
 
     # spectrograms was prepared by the host
     # spec_id -> spectrogram
@@ -475,9 +479,9 @@ def init_train_dataloader(
         num_workers=num_workers,
         drop_last=True,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=2 if num_workers > 0 else None,
         worker_init_fn=lambda _: my_utils_common.seed_everything(42),
-        persistent_workers=True,
+        persistent_workers=True if num_workers > 0 else False,
     )
     return dl
 
@@ -537,10 +541,10 @@ def init_valid_dataloader(
         shuffle=False,
         num_workers=num_workers,
         drop_last=False,
-        pin_memory=True,
-        prefetch_factor=2,
+        pin_memory=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None,
         worker_init_fn=lambda _: my_utils_common.seed_everything(42),
-        persistent_workers=True,
+        persistent_workers=True if num_workers > 0 else False,
     )
     return dl
 

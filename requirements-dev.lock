@@ -498,7 +498,8 @@ urllib3==1.26.13
     # via kaggle
     # via requests
     # via sentry-sdk
-wandb==0.16.3
+wandb==0.16.5
+    # via hms-2024
 wcwidth==0.2.13
     # via prompt-toolkit
 webcolors==1.13

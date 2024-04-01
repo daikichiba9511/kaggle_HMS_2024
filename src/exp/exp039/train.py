@@ -15,6 +15,7 @@ from torch.utils import data as torch_data
 from tqdm.auto import tqdm
 
 import wandb
+from src import constants
 from src.exp.exp039 import config as my_config
 from src.models import layers as my_layers
 from src.training import data as my_data
@@ -43,8 +44,9 @@ def parse_args() -> argparse.Namespace:
 def make_specs_from_signals(
     signals: torch.Tensor,
     spec_module: torchaudio.transforms.Spectrogram | torchaudio.transforms.MelSpectrogram,
-    db_transform: torchaudio.transforms.AmplitudeToDB | None = None,
+    db_transform: torchaudio.transforms.AmplitudeToDB | my_layers.MyAmplitudeToDB | None = None,
     random_crop_signal_augmentation: bool = False,
+    inverse_augmentation: bool = False,
     crop_signal_length: int = 7500,
 ) -> torch.Tensor:
     bs = signals.size(0)
@@ -59,9 +61,13 @@ def make_specs_from_signals(
                 start_point = np.random.randint(0, 10000 - crop_signal_length)
                 signal = signal[:, start_point : start_point + crop_signal_length]
 
-            reduced_signals = my_preprocessings.butter_lowpass_filter(signals.numpy())
-            reduced_signals = my_preprocessings.quantize_data(reduced_signals, classes=256)
-            signals = torch.from_numpy(reduced_signals).float()
+            # reduced_signals = my_preprocessings.butter_lowpass_filter(signals.numpy())
+            # reduced_signals = my_preprocessings.quantize_data(reduced_signals, classes=256)
+            # signals = torch.from_numpy(reduced_signals).float()
+
+            if inverse_augmentation and np.random.rand() < 0.5:
+                # signal shape: (bs, 10000)
+                signal = signal.flip(1)
 
             spec = spec_module(signal)
             if db_transform is not None:
@@ -72,16 +78,14 @@ def make_specs_from_signals(
             # shape: (bs, 128, 256)
             spec = spec[:, :height, :width]
 
-            # channel normalization
-            # Standardization -1 to 1
-            spec = (spec - spec.min(0)) / (spec.max(0) - spec.min(0) + 1e-6)
-            # mel_spec shape: (bs, 4, 128, 256)
-
+            spec = (spec + 40) / 40
             specs[:, k, :, :] += spec
-            specs[:, k, :, :] /= 4
 
-    # specs = (specs - specs.mean()) / (specs.std() + 1e-6)
-    # specs = (specs - specs.min()) / (specs.max() - specs.min() + 1e-6)
+        # clip outliers for stability and standardization
+        specs[:, k, :, :] /= 4.0
+        # specs[:, k, :, :] = torch.clamp(specs[:, k, :, :], min=np.exp(-4.0), max=np.exp(8.0))
+        # specs[:, k, :, :] = torch.log(specs[:, k, :, :]) / 4.0
+
     return specs
 
 
@@ -134,29 +138,27 @@ def train_one_epoch(
     else:
         my_tools.unfreeze(model, keys)
 
+    n_fft = 1024 * 2
     spec_modules = [
-        _init_spec_module(power=1.5, fmax=20, hop_length=7500 // 256),
-        _init_spec_module(power=2.0, fmax=20, hop_length=7500 // 256),
-        _init_spec_module(power=3.0, fmax=20, hop_length=7500 // 256),
+        _init_spec_module(power=2.0, fmax=20, hop_length=10000 // 256, n_fft=n_fft),
+        _init_spec_module(power=3.0, fmax=20, hop_length=10000 // 256, n_fft=n_fft),
+        _init_spec_module(power=4.0, fmax=20, hop_length=10000 // 256, n_fft=n_fft),
+        _init_spec_module(power=5.0, fmax=20, hop_length=10000 // 256, n_fft=n_fft),
     ]
 
-    db_transform = my_layers.init_db_transform_module()
+    db_transform = my_layers.MyAmplitudeToDB(stype="power", top_db=80, ref_value=torch.max)
     # Spectrogram module
-    time_mask_size1 = np.random.randint(1, 256)
-    freq_mask_size1 = np.random.randint(1, 128)
-    time_mask_size2 = np.random.randint(1, 256)
-    freq_mask_size2 = np.random.randint(1, 128)
     spec_aug = nn.Sequential(
         torchaudio.transforms.FrequencyMasking(freq_mask_param=15, iid_masks=True),
-        torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size1, iid_masks=True),
-        torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size2, iid_masks=True),
-        torchaudio.transforms.TimeMasking(time_mask_param=35, iid_masks=False, p=0.5),
-        torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size1, iid_masks=True, p=0.5),
-        torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size2, iid_masks=True, p=0.5),
+        torchaudio.transforms.FrequencyMasking(freq_mask_param=np.random.randint(1, 128), iid_masks=True),
+        torchaudio.transforms.FrequencyMasking(freq_mask_param=np.random.randint(1, 128), iid_masks=True),
+        torchaudio.transforms.TimeMasking(time_mask_param=35, iid_masks=True, p=0.5),
+        torchaudio.transforms.TimeMasking(time_mask_param=np.random.randint(1, 256), iid_masks=True, p=0.5),
+        torchaudio.transforms.TimeMasking(time_mask_param=np.random.randint(1, 256), iid_masks=True, p=0.5),
     )
 
     # -- Mixup
-    mixupper = my_preprocessings.Mixup(p=0.75, alpha=0.5)
+    mixupper = my_preprocessings.Mixup(p=0.75, alpha=0.2)
     if epoch < 13:
         mixupper.init_lambda()
 
@@ -173,16 +175,19 @@ def train_one_epoch(
             x = batch["x"].to(device, non_blocking=True, dtype=torch.float32)
 
             # -- Signal To MelSpectrograms
-            specs = make_specs_from_signals(
-                signals=batch["signals"], spec_module=spec_modules[np.random.randint(len(spec_modules))]
-            )
-            specs = db_transform(specs)
-            specs = spec_aug(specs)
+            if np.random.rand() < 0.75:
+                spec_module = spec_modules[0]
+            else:
+                spec_module = spec_modules[np.random.randint(0, len(spec_modules))]
 
-            # clip outliers for stability and standardization
-            # specs = torch.clamp(specs, min=np.exp(-4.0), max=np.exp(8.0))
-            # specs = torch.log(specs)
-            specs = (specs - specs.mean()) / (specs.std() + 1e-6)
+            specs = make_specs_from_signals(
+                signals=batch["signals"],
+                spec_module=spec_module,
+                db_transform=db_transform,
+            )
+            if np.random.rand() < 1.0:
+                specs = spec_aug(specs)
+            # specs = my_preprocessings.batch_min_max_normalization(specs)
 
             specs = specs.permute(0, 2, 3, 1)
             specs = specs.to(device, non_blocking=True, dtype=torch.float32)
@@ -253,19 +258,8 @@ def valid_one_epoch(
     accs = my_tools.AverageMeter("accs")
 
     # Spectrogram module
-    spec_module = torchaudio.transforms.MelSpectrogram(
-        sample_rate=200,
-        n_fft=1024,
-        hop_length=10000 // 256,
-        win_length=128,
-        n_mels=128,
-        f_min=0,
-        f_max=20,
-        power=2.0,
-        pad_mode="constant",
-        center=True,
-    )
-    db_transform = my_layers.init_db_transform_module()
+    spec_module = _init_spec_module(power=2.0, fmax=20, hop_length=10000 // 256, n_fft=1024 * 2)
+    db_transform = my_layers.MyAmplitudeToDB(stype="power", top_db=80, ref_value=torch.max)
 
     spec_offsets = []
     eeg_ids_list = []
@@ -282,13 +276,12 @@ def valid_one_epoch(
             x = batch["x"].to(device, non_blocking=True, dtype=torch.float32)
 
             # -- Signal To MelSpectrograms
-            specs = make_specs_from_signals(signals=batch["signals"], spec_module=spec_module)
-            specs = db_transform(specs)
-
-            # clip outliers for stability and standardization
-            specs = torch.clamp(specs, min=np.exp(-4.0), max=np.exp(8.0))
-            specs = torch.log(specs)
-            specs = (specs - specs.mean()) / (specs.std() + 1e-6)
+            specs = make_specs_from_signals(
+                signals=batch["signals"],
+                spec_module=spec_module,
+                db_transform=db_transform,
+            )
+            # specs = my_preprocessings.batch_min_max_normalization(specs)
 
             specs = specs.permute(0, 2, 3, 1)
             specs = specs.to(device, non_blocking=True, dtype=torch.float32)
@@ -303,6 +296,8 @@ def valid_one_epoch(
         losses.update(loss.item())
 
         y_pred = F.softmax(logits, dim=1)
+        acc = (y_pred.argmax(1) == y.argmax(1)).float().mean().detach().cpu()
+        accs.update(acc.item())
 
         spec_offsets.append(batch["spec_offset"])
         eeg_ids_list.append(batch["eeg_id"])
@@ -315,6 +310,13 @@ def valid_one_epoch(
 
     y_trues = np.concatenate(y_trues_list, axis=0)
     y_preds = np.concatenate(y_preds_list, axis=0)
+
+    losses_per_class = {}
+    for i in range(6):
+        loss_value = loss_fn(F.log_softmax(torch.tensor(y_preds[:, i]), dim=0), torch.tensor(y_trues[:, i]))
+        col_name = f"valid/loss_{constants.TARGETS[i]}"
+        losses_per_class[col_name] = loss_value.item()
+
     acc = (y_preds.argmax(1) == y_trues.argmax(1)).mean()
     y_raws = np.concatenate(y_raws_list, axis=0)
     valid_oof = pl.DataFrame({
@@ -347,6 +349,7 @@ def valid_one_epoch(
         "valid/loss": losses.avg,
         "valid/oof": valid_oof,
         "valid/acc": acc,
+        **losses_per_class,
     }
     return valid_results
 

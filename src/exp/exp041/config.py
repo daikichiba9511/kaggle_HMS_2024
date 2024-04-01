@@ -34,8 +34,9 @@ class TrainConfigImpl(my_tools.TrainConfig):
         default_factory=lambda: cast(
             my_optim.AdamWParams,
             dict(
-                lr=1e-3,
-                # lr=5e-4,
+                lr=1e-3,  # bs=32
+                # lr=5e-4,  # bs=16
+                # lr=1e-4,  # bs=8
                 weight_decay=1e-2,
                 eps=1e-6,
             ),
@@ -47,7 +48,7 @@ class TrainConfigImpl(my_tools.TrainConfig):
             my_optim.SchduleParams,
             dict(
                 t_initial=15,
-                lr_min=1e-7,
+                lr_min=1e-6,
                 warmup_prefix=False,
                 warmup_t=1,
                 warmup_lr_init=1e-6,
@@ -99,12 +100,12 @@ class ValidConfigImpl(my_tools.ValidConfig):
 
 @dataclasses.dataclass
 class ConfigImpl(my_tools.Config):
-    base: str = "exp038"
+    base: str = "exp039"
     diff: str = """1st stage training of two stage training.
     add random power spec
-    add reduce high freq noise
+    add inverse signal augmentation
     """
-    name: str = "exp039"
+    name: str = "exp041"
     seed: int = 42
     output_dir: pathlib.Path = constants.OUTPUT_DIR / name
 

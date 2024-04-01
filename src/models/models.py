@@ -34,30 +34,35 @@ class HMSModel(nn.Module):
 
         Args:
             x (torch.Tensor): input tensor, shape (bs, 128, 256, 8)
+
+        Returns:
+            x: transformed tensor, shape (bs, 3, 512, 512)
         """
-        # shape: (bs, 4, 128, 256)
-        # spectrograms = [x[:, i : i + 1, :, :] for i in range(4)]
-        spectrograms = [x[:, :, :, i : i + 1] for i in range(4)]
-        spectrograms = torch.cat(spectrograms, dim=1)
+        # spectrograms shape: (bs, 128, 256, 4)
+        spectrograms = torch.cat([x[:, :, :, i : i + 1] for i in range(4)], dim=1)
+        # eegs shape: (bs, 512, 256, 4)
+        eegs = torch.cat([x[:, :, :, i : i + 1] for i in range(4, 8)], dim=1)
+        x1 = torch.cat([spectrograms, eegs], dim=2)
 
-        # shape: (bs, 4, 128, 256)
-        eegs = [x[:, :, :, i : i + 1] for i in range(4, 8)]
-        eegs = torch.cat(eegs, dim=1)
+        # specs_from_signals shape: (bs, 512, 256, 4)
+        specs_from_signals = torch.cat([x[:, :, :, i : i + 1] for i in range(8, 12)], dim=1)
+        x2 = torch.cat([specs_from_signals, specs_from_signals], dim=2)
 
-        x = torch.cat([spectrograms, eegs], dim=2)
-        img = torch.cat([x, x, x], dim=3)
+        # x shape: (bs, 512, 512, 3)
+        x = torch.cat([x1, x1, x1], dim=3)
+        # x = torch.cat([x1, x2, x1], dim=3)
 
-        # region x {spectrogram, eeg} のスペクトログラムの貼り合わせ x 3 (channel direction)
-        # |-------------------|
-        # |    |    |    |    |
-        # |-------------------|
-        # |    |    |    |    |
-        # |-------------------|
-        #
-        # permute to (bs, 3, 512, 512) to order channel first
-        # shape: (bs, 512, 512, 3) -> (bs, 3, 512, 512)
-        img = img.permute(0, 3, 1, 2)
-        return img
+        # region x {spectrogram, eeg} のスペクトログラム(128, 256)の貼り合わせ x 3 (channel direction)
+        # |-----------|
+        # |  |  |  |  |
+        # |  |  |  |  |
+        # |-----------|
+        # |  |  |  |  |
+        # |  |  |  |  |
+        # |-----------|
+        # shape: (bs, 3, 512, 512)
+        x = x.permute(0, 3, 1, 2)
+        return x
 
     def forward(
         self: Self,
@@ -69,18 +74,20 @@ class HMSModel(nn.Module):
         k_list: list[int] | None = None,
         a_list: list[float] | None = None,
     ) -> dict[str, torch.Tensor]:
+        # img shape: (bs, 3, 512, 512)
         img = self._consolidate_patches_into_a_image(x)
         # -- CutMixup
         if lam is not None and do_mixup:
             if bboxes is not None and y is not None and k_list is not None and a_list is not None:
-                x, y = my_preprocess.torch_cutmix(
+                img, y = my_preprocess.torch_cutmix(
                     img=img,
                     labels=y,
                     a_list=a_list,
                     bboxes=bboxes,
                     k_list=k_list,
                 )
-                img = lam * x + (1.0 - lam) * x.flip(0)
+                # Mixup
+                img = lam * img + (1.0 - lam) * img.flip(0)
                 y = lam * y + (1.0 - lam) * y.flip(0)
             else:
                 img = lam * img + (1.0 - lam) * img.flip(0)
@@ -155,11 +162,16 @@ class HMSTransformerModel(nn.Module):
             specs_from_signals = [x[:, :, :, i : i + 1] for i in range(8, 12)]
             # shape: (bs, 512, 256, 4)
             specs_from_signals = torch.cat(specs_from_signals, dim=1)
-            specs_from_signals = torch.cat([specs_from_signals, specs_from_signals], dim=2)
 
-            x = torch.cat([spectrograms, eegs], dim=2)
+            # specs_from_signals = torch.cat([specs_from_signals, specs_from_signals], dim=2)
+
+            # x = torch.cat([spectrograms, eegs], dim=2)
+            x = torch.cat([specs_from_signals, eegs], dim=2)
+            # x2 = torch.cat([eegs, specs_from_signals], dim=2)
+            x = torch.cat([x, x, x], dim=3)
             # exp026
-            x = torch.cat([x, specs_from_signals, x], dim=3)
+            # x = torch.cat([x, x2, x], dim=3)
+            # x = torch.cat([x, x2, x], dim=3)
             # exp027
             # x = torch.cat([x, specs_from_signals, specs_from_signals], dim=3)
         else:
@@ -294,30 +306,27 @@ class HMS1DSpecTransformerModel(nn.Module):
             specs_from_signals = torch.cat(specs_from_signals, dim=1)
             specs_from_signals = torch.cat([specs_from_signals, specs_from_signals], dim=2)
 
-            x = torch.cat([spectrograms, eegs], dim=2)
+            x = torch.concat([spectrograms, eegs], dim=2)
             # exp026
-            x = torch.cat([x, specs_from_signals, x], dim=3)
+            x = torch.concat([x, specs_from_signals, x], dim=3)
             # exp027
             # x = torch.cat([x, specs_from_signals, specs_from_signals], dim=3)
         elif x.shape[3] == 16:
-            x = torch.cat([spectrograms, eegs], dim=2)
+            x = torch.concat([spectrograms, eegs], dim=2)
 
-            # shape: (bs, 128, 256, 4)
-            specs_from_signals = [x[:, :, :, i : i + 1] for i in range(8, 12)]
-            # shape: (bs, 512, 256, 4)
-            specs_from_signals = torch.cat(specs_from_signals, dim=1)
-            specs_from_signals = torch.cat([specs_from_signals, specs_from_signals], dim=2)
+            # spec_from_signals shape: (bs, 128, 256, 4)
+            specs_from_signals = torch.concat([x[:, :, :, i : i + 1] for i in range(8, 12)], dim=1)
+            x2 = torch.concat([specs_from_signals, specs_from_signals], dim=2)
 
-            # shape: (bs, 128, 256, 4)
-            wavegram = [x[:, :, :, i : i + 1] for i in range(12, 16)]
-            wavegram = torch.cat(wavegram, dim=1)
-            wavegram = torch.cat([wavegram, wavegram], dim=2)
+            # wavegram shape: (bs, 128, 256, 4)
+            wavegram = torch.cat([x[:, :, :, i : i + 1] for i in range(12, 16)], dim=1)
+            x3 = torch.concat([wavegram, wavegram], dim=2)
 
-            x = torch.cat([x, wavegram, specs_from_signals], dim=3)
+            x = torch.concat([x, x2, x3], dim=3)
 
         else:
-            x = torch.cat([spectrograms, eegs], dim=2)
-            x = torch.cat([x, x, x], dim=3)
+            x = torch.concat([spectrograms, eegs], dim=2)
+            x = torch.concat([x, x, x], dim=3)
 
         # region x {spectrogram, eeg} のスペクトログラム(128, 256)の貼り合わせ x 3 (channel direction)
         # |-----------|

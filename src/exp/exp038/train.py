@@ -134,13 +134,17 @@ def train_one_epoch(
 
     db_transform = my_layers.init_db_transform_module()
     # Spectrogram module
-    time_mask_size = np.random.randint(1, 256)
-    freq_mask_size = np.random.randint(1, 128)
+    time_mask_size1 = np.random.randint(1, 256)
+    freq_mask_size1 = np.random.randint(1, 128)
+    time_mask_size2 = np.random.randint(1, 256)
+    freq_mask_size2 = np.random.randint(1, 128)
     spec_aug = nn.Sequential(
         torchaudio.transforms.FrequencyMasking(freq_mask_param=15, iid_masks=True),
-        torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size, iid_masks=True),
+        torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size1, iid_masks=True),
+        torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_size2, iid_masks=True),
         torchaudio.transforms.TimeMasking(time_mask_param=35, iid_masks=False, p=0.5),
-        torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size, iid_masks=True, p=0.5),
+        torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size1, iid_masks=True, p=0.5),
+        torchaudio.transforms.TimeMasking(time_mask_param=time_mask_size2, iid_masks=True, p=0.5),
     )
 
     # -- Mixup
@@ -162,7 +166,9 @@ def train_one_epoch(
 
             # -- Signal To MelSpectrograms
             specs = make_specs_from_signals(
-                signals=batch["signals"], spec_module=spec_modules[np.random.randint(len(spec_modules))]
+                signals=batch["signals"],
+                spec_module=spec_modules[np.random.randint(len(spec_modules))],
+                random_crop_signal_augmentation=True,
             )
             specs = db_transform(specs)
             specs = spec_aug(specs)

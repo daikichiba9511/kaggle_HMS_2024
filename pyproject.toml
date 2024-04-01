@@ -27,6 +27,7 @@ dependencies = [
     "librosa>=0.10.1",
     "torchaudio>=2.2.1",
     "pywavelets>=1.5.0",
+    "wandb>=0.16.5",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"
@@ -45,7 +46,7 @@ dev-dependencies = [
     "ruff>=0.1.11",
     "ipython~=8.14.0",
     "jupyterlab~=4.0.2",
-    "wandb>=0.16.2",
+    "wandb>=0.16.5",
     "mypy>=1.4.1",
     "ipykernel>=6.25.2",
     "memray>=1.10.0",
